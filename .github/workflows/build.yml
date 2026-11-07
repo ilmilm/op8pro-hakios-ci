@@ -1,0 +1,86 @@
+# HakiOS for OnePlus 8 Pro (IN2020 / SM8250 kona) — CI
+# Milestone 1: the oneplus8pro configuration (common kernel + sm8250 SoC layer + device fragment)
+# compiles, and the open-profile kernel boots to `hello` under QEMU through HakiOS U-Boot.
+name: hakios-oneplus8pro
+on:
+  workflow_dispatch:
+  push:
+
+jobs:
+  qemu-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout HakiOS common
+        uses: actions/checkout@v4
+        with:
+          repository: oosexgang/hakios-xnu-kernel
+          ref: main
+          path: hakios
+          fetch-depth: 1
+
+      - name: Checkout device port (oneplus8pro + sm8250 SoC layer)
+        uses: actions/checkout@v4
+        with:
+          repository: ilmilm/hakios-oneplus8pro
+          ref: main
+          path: hakios/devices/oneplus8pro
+
+      - name: Sync remaining device and uefi repositories
+        run: |
+          cd hakios
+          python3 tools/hakios-device.py sync
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang lld python3 git curl cpio xz-utils bc bison flex \
+            gcc-aarch64-linux-gnu qemu-system-arm unzip
+
+      - name: Device defconfig (oneplus8pro)
+        run: |
+          cd hakios
+          make oneplus8pro_defconfig
+          make config
+
+      - name: Kernel (XNU with sm8250 device configuration)
+        run: |
+          cd hakios
+          make kernel JOBS=$(nproc)
+
+      - name: Loader, open profile (placeholder identity)
+        run: |
+          cd hakios
+          make loader-open
+
+      - name: QEMU smoke through U-Boot (open kernel + hello)
+        run: |
+          cd hakios
+          make qemu-u-boot SECS=30 JOBS=$(nproc) || true
+
+      - name: Judge the smoke log
+        run: |
+          cd hakios
+          echo "----- qemu-u-boot.log -----"
+          cat logs/qemu-u-boot.log || true
+          grep -q "XNULOADER" logs/qemu-u-boot.log && echo "::notice::loader banner seen"
+          grep -q "Hello from user space on Darwin" logs/qemu-u-boot.log \
+            && echo "::notice::HELLO OK — full chain to user space" \
+            || { echo "::error::hello not reached"; exit 1; }
+
+      - name: Package the phone payload (open profile)
+        run: |
+          cd hakios
+          xnuloader/mkpayload.py -o payload-op8pro-open.bin kernel=hakios-kernel ramdisk=userland/hello \
+            --cmdline "$(tools/hakios-config.py args)"
+          sha256sum hakios-kernel payload-op8pro-open.bin
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hakios-op8pro-build
+          path: |
+            hakios/hakios-kernel
+            hakios/payload-op8pro-open.bin
+            hakios/logs/qemu-u-boot.log
+          if-no-files-found: error
