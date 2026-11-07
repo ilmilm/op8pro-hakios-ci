@@ -61,13 +61,14 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/theos
-          key: theos-linux-ubuntu-v2
+          key: theos-linux-ubuntu-v3
 
       - name: Install theos (manual layout, cctools + iPhoneOS16.5.sdk)
         run: |
           set -e
           THEOS_DIR="$HOME/theos"
           if [ ! -f "$THEOS_DIR/Makefile" ]; then
+            rm -rf "$THEOS_DIR"
             git clone --recursive --depth 1 https://github.com/theos/theos.git "$THEOS_DIR"
           fi
           if [ ! -x "$THEOS_DIR/toolchain/linux/iphone/bin/ld" ]; then
@@ -114,8 +115,8 @@ jobs:
           sed -n '120,140p' xnu-src/xnu-8796.121.2/makedefs/MakeInc.kernel 2>/dev/null
           echo "===== dsym tools ====="
           command -v dsymutil dwarfdump 2>/dev/null || echo "(no dsymutil/dwarfdump on PATH)"
-          ls xnu-deps/host/bin 2>/dev/null
-          ls "$THEOS/toolchain/linux/iphone/bin" 2>/dev/null | head -30
+          ls xnu-deps/host/bin 2>/dev/null || true
+          ls "$THEOS/toolchain/linux/iphone/bin" 2>/dev/null | head -30 || true
 
       - name: Upload failure diagnostics
         if: failure()
