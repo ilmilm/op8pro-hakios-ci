@@ -11,6 +11,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
+      - name: Checkout this CI repository (the loader patch)
+        uses: actions/checkout@v4
+        with:
+          path: ci
+
       - name: Checkout HakiOS common
         uses: actions/checkout@v4
         with:
@@ -39,6 +44,12 @@ jobs:
           cd hakios
           git -C uefi fetch origin u-boot
           git -C uefi checkout FETCH_HEAD
+
+      - name: Apply the loader platform patch (instantnoodlep, fb 0x9C000000)
+        run: |
+          cd hakios
+          git apply --check ../ci/xnuloader-instantnoodlep.patch
+          git apply ../ci/xnuloader-instantnoodlep.patch
 
       - name: Install build dependencies
         run: |
@@ -143,6 +154,13 @@ jobs:
             --cmdline "$(tools/hakios-config.py args)"
           sha256sum hakios-kernel payload-op8pro-open.bin
 
+      - name: U-Boot for oneplus8pro + the fastboot boot image
+        run: |
+          cd hakios
+          uefi/u-boot/build.sh oneplus8pro
+          tools/mkubootimg.py -d oneplus8pro -p payload-op8pro-open.bin -o hakios-u-boot-oneplus8pro.img
+          sha256sum u-boot/build-oneplus8pro/u-boot.bin hakios-u-boot-oneplus8pro.img
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -150,5 +168,6 @@ jobs:
           path: |
             hakios/hakios-kernel
             hakios/payload-op8pro-open.bin
+            hakios/hakios-u-boot-oneplus8pro.img
             hakios/logs/qemu-u-boot.log
           if-no-files-found: error

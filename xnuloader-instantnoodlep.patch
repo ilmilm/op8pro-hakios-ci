@@ -1,0 +1,36 @@
+diff --git a/xnuloader/loader.c b/xnuloader/loader.c
+index 422f9d3..4fc3946 100644
+--- a/xnuloader/loader.c
++++ b/xnuloader/loader.c
+@@ -588,6 +588,21 @@ static const struct platform platform_redwood = {
+ 	.small_cores = 0x0f,
+ };
+ 
++static const struct platform platform_instantnoodlep = {
++	/* OnePlus 8 Pro (IN2020, SM8250 "kona"): the same shape redwood's entry has.
++	   The io window runs from the SoC's first peripheral (GCC at 0x00100000) through
++	   the peripherals' end; GIC-500 at the addresses the phone's device tree gives.
++	   io_base must be non-zero: XNU treats a zero SoC base as "no SoC". */
++	.name = "instantnoodlep", .io_base = 0x00100000, .io_size = 0x3FF00000,
++	.gic_dist = 0x17A00000, .gic_redist = 0x17A60000, .uart = 0, .log_other_cpu = 1,
++	.cores = 8, .core_shift = 8,
++	/*
++	 * Cores 0-3 are Cortex-A55s (1.8 GHz at most), 4-7 Cortex-A77s (2.4/2.84 GHz):
++	 * the same split redwood has (the phone's own device tree, capacity 1024 vs 1894).
++	 */
++	.small_cores = 0x0f,
++};
++
+ /* ------------------------------------------------------------------------ */
+ 
+ static void
+@@ -4345,6 +4360,9 @@ efi_main(efi_handle image, efi_system_table *st)
+ 		SCREEN.stride = GOP->mode->info->pixels_per_scanline * 4;
+ 		if (SCREEN.base == 0xE1000000ULL) {
+ 			PLAT = &platform_redwood;
++		} else if (SCREEN.base == 0x9C000000ULL) {
++			/* OnePlus 8 Pro: ABL's continuing splash (cont_splash 0x9c000000). */
++			PLAT = &platform_instantnoodlep;
+ 		} else {
+ 			ramfb_phone_screen();
+ 		}
