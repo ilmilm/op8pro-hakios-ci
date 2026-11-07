@@ -52,7 +52,7 @@ jobs:
           fi
           if [ ! -x "$THEOS_DIR/toolchain/linux/iphone/bin/ld" ]; then
             rm -rf /tmp/tc && mkdir -p /tmp/tc "$THEOS_DIR/toolchain/linux/iphone"
-            curl -fL -o /tmp/tc/tc.tar.xz https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain.tar.xz
+            curl -fL -o /tmp/tc/tc.tar.xz "https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-$(uname -m).tar.xz"
             tar -xJf /tmp/tc/tc.tar.xz -C /tmp/tc
             tar_root=/tmp/tc
             [ -d /tmp/tc/bin ] || tar_root=$(find /tmp/tc -maxdepth 4 -type d -name bin -printf '%h\n' | head -1)
