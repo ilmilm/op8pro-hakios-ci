@@ -59,8 +59,11 @@ jobs:
             cp -a "$tar_root"/. "$THEOS_DIR/toolchain/linux/iphone/"
           fi
           if [ ! -d "$THEOS_DIR/sdks/iPhoneOS16.5.sdk" ]; then
-            git clone --depth 1 --filter=blob:none --sparse https://github.com/theos/sdks.git "$THEOS_DIR/sdks"
-            git -C "$THEOS_DIR/sdks" sparse-checkout set iPhoneOS16.5.sdk
+            rm -rf /tmp/sdkrepo
+            git clone --depth 1 --filter=blob:none --sparse https://github.com/theos/sdks.git /tmp/sdkrepo
+            git -C /tmp/sdkrepo sparse-checkout set iPhoneOS16.5.sdk
+            mkdir -p "$THEOS_DIR/sdks"
+            mv /tmp/sdkrepo/iPhoneOS16.5.sdk "$THEOS_DIR/sdks/"
           fi
           test -x "$THEOS_DIR/toolchain/linux/iphone/bin/ld"
           test -d "$THEOS_DIR/sdks/iPhoneOS16.5.sdk"
