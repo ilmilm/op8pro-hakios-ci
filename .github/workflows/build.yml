@@ -41,16 +41,30 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/theos
-          key: theos-linux-ubuntu-v1
+          key: theos-linux-ubuntu-v2
 
-      - name: Install theos (cctools toolchain + iPhoneOS16.5.sdk)
+      - name: Install theos (manual layout, cctools + iPhoneOS16.5.sdk)
         run: |
-          if [ ! -d "$HOME/theos/sdks/iPhoneOS16.5.sdk" ] || [ ! -x "$HOME/theos/toolchain/linux/iphone/bin/ld" ]; then
-            bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)"
+          set -e
+          THEOS_DIR="$HOME/theos"
+          if [ ! -f "$THEOS_DIR/Makefile" ]; then
+            git clone --recursive --depth 1 https://github.com/theos/theos.git "$THEOS_DIR"
           fi
-          test -d "$HOME/theos/sdks/iPhoneOS16.5.sdk"
-          test -x "$HOME/theos/toolchain/linux/iphone/bin/ld"
-          echo "THEOS=$HOME/theos" >> "$GITHUB_ENV"
+          if [ ! -x "$THEOS_DIR/toolchain/linux/iphone/bin/ld" ]; then
+            rm -rf /tmp/tc && mkdir -p /tmp/tc "$THEOS_DIR/toolchain/linux/iphone"
+            curl -fL -o /tmp/tc/tc.tar.xz https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain.tar.xz
+            tar -xJf /tmp/tc/tc.tar.xz -C /tmp/tc
+            tar_root=/tmp/tc
+            [ -d /tmp/tc/bin ] || tar_root=$(find /tmp/tc -maxdepth 4 -type d -name bin -printf '%h\n' | head -1)
+            cp -a "$tar_root"/. "$THEOS_DIR/toolchain/linux/iphone/"
+          fi
+          if [ ! -d "$THEOS_DIR/sdks/iPhoneOS16.5.sdk" ]; then
+            git clone --depth 1 --filter=blob:none --sparse https://github.com/theos/sdks.git "$THEOS_DIR/sdks"
+            git -C "$THEOS_DIR/sdks" sparse-checkout set iPhoneOS16.5.sdk
+          fi
+          test -x "$THEOS_DIR/toolchain/linux/iphone/bin/ld"
+          test -d "$THEOS_DIR/sdks/iPhoneOS16.5.sdk"
+          echo "THEOS=$THEOS_DIR" >> "$GITHUB_ENV"
 
       - name: Device defconfig (oneplus8pro)
         run: |
