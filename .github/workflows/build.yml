@@ -80,6 +80,27 @@ jobs:
           cd hakios
           make kernel JOBS=$(nproc)
 
+      - name: Dump kernel build diagnostics (on failure)
+        if: failure()
+        run: |
+          cd hakios
+          for f in xnu-deps/exporthdrs.log xnu-deps/*.log; do
+            [ -f "$f" ] && { echo "===== $f ====="; tail -60 "$f"; }
+          done
+          find xnu-src -name '*.log' 2>/dev/null | while read -r f; do
+            echo "===== $f ====="; tail -40 "$f"
+          done
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-failure-logs
+          path: |
+            hakios/xnu-deps/*.log
+            hakios/logs/*
+          if-no-files-found: ignore
+
       - name: Loader, open profile (placeholder identity)
         run: |
           cd hakios
