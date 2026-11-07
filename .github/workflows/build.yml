@@ -35,7 +35,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential clang lld python3 git curl cpio xz-utils bc bison flex \
-            gcc-aarch64-linux-gnu qemu-system-arm unzip uuid-dev
+            gcc-aarch64-linux-gnu qemu-system-arm unzip uuid-dev llvm
 
       - name: Cache theos
         uses: actions/cache@v4
@@ -90,6 +90,12 @@ jobs:
           find xnu-src -name '*.log' 2>/dev/null | while read -r f; do
             echo "===== $f ====="; tail -40 "$f"
           done
+          echo "===== MakeInc.kernel 120-140 ====="
+          sed -n '120,140p' xnu-src/xnu-8796.121.2/makedefs/MakeInc.kernel 2>/dev/null
+          echo "===== dsym tools ====="
+          command -v dsymutil dwarfdump 2>/dev/null || echo "(no dsymutil/dwarfdump on PATH)"
+          ls xnu-deps/host/bin 2>/dev/null
+          ls "$THEOS/toolchain/linux/iphone/bin" 2>/dev/null | head -30
 
       - name: Upload failure diagnostics
         if: failure()
