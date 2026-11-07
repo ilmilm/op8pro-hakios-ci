@@ -31,6 +31,15 @@ jobs:
           cd hakios
           python3 tools/hakios-device.py sync
 
+      - name: Move uefi checkout to the u-boot branch
+        # the manifest pins an older hakios-uefi revision whose u-boot files predate
+        # `hakios load` setting hakios_start (cmd/hakios.c env_set); the qemu u-boot
+        # flow needs the newer code from the upstream "u-boot" branch
+        run: |
+          cd hakios
+          git -C uefi fetch origin u-boot
+          git -C uefi checkout FETCH_HEAD
+
       - name: Install build dependencies
         run: |
           sudo apt-get update
