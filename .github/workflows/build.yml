@@ -360,6 +360,9 @@ jobs:
       - name: U-Boot for oneplus8pro + the darwin boot image
         run: |
           cd hakios
+          # the smoke job gets u-boot/ from `make qemu-u-boot` (it runs uefi/u-boot/apply.sh);
+          # darwin skips qemu, so apply the u-boot tree here
+          [ -d u-boot ] || uefi/u-boot/apply.sh
           uefi/u-boot/build.sh oneplus8pro
           tools/mkubootimg.py -d oneplus8pro -p payload-op8pro-darwin.bin -o hakios-u-boot-darwin.img
           sha256sum u-boot/build-oneplus8pro/u-boot.bin hakios-u-boot-darwin.img
