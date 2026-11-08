@@ -73,7 +73,12 @@ jobs:
           fi
           if [ ! -x "$THEOS_DIR/toolchain/linux/iphone/bin/ld" ]; then
             rm -rf /tmp/tc && mkdir -p /tmp/tc "$THEOS_DIR/toolchain/linux/iphone"
-            curl -fL -o /tmp/tc/tc.tar.xz "https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-$(uname -m).tar.xz"
+            for attempt in 1 2 3 4 5 6 7 8; do
+              curl -fL --retry 3 --retry-delay 10 -C - -o /tmp/tc/tc.tar.xz                 "https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-$(uname -m).tar.xz" && break
+              echo "toolchain download attempt $attempt failed; retrying"
+              sleep 20
+            done
+            test -s /tmp/tc/tc.tar.xz
             tar -xJf /tmp/tc/tc.tar.xz -C /tmp/tc
             tar_root=/tmp/tc
             [ -d /tmp/tc/bin ] || tar_root=$(find /tmp/tc -maxdepth 4 -type d -name bin -printf '%h\n' | head -1)
@@ -250,7 +255,12 @@ jobs:
           fi
           if [ ! -x "$THEOS_DIR/toolchain/linux/iphone/bin/ld" ]; then
             rm -rf /tmp/tc && mkdir -p /tmp/tc "$THEOS_DIR/toolchain/linux/iphone"
-            curl -fL -o /tmp/tc/tc.tar.xz "https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-$(uname -m).tar.xz"
+            for attempt in 1 2 3 4 5 6 7 8; do
+              curl -fL --retry 3 --retry-delay 10 -C - -o /tmp/tc/tc.tar.xz                 "https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-$(uname -m).tar.xz" && break
+              echo "toolchain download attempt $attempt failed; retrying"
+              sleep 20
+            done
+            test -s /tmp/tc/tc.tar.xz
             tar -xJf /tmp/tc/tc.tar.xz -C /tmp/tc
             tar_root=/tmp/tc
             [ -d /tmp/tc/bin ] || tar_root=$(find /tmp/tc -maxdepth 4 -type d -name bin -printf '%h\n' | head -1)
