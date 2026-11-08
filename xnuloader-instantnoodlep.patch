@@ -1,6 +1,993 @@
+diff --git a/configs/boot-args.lst b/configs/boot-args.lst
+index cb2079e..c14ae7c 100644
+--- a/configs/boot-args.lst
++++ b/configs/boot-args.lst
+@@ -278,6 +278,8 @@ thermal_tm1	k
+ torch	kl
+ torch_max_s	k
+ torch_secs	k
++touch791	k
++touch791_poll	k
+ touch_flip	k
+ touch_lat	ku
+ touch_poll_us	k
+diff --git a/configs/symbols.tsv b/configs/symbols.tsv
+index 17df562..ff76470 100644
+--- a/configs/symbols.tsv
++++ b/configs/symbols.tsv
+@@ -251,8 +251,10 @@ THERMAL_TM1	arg	thermal_tm1	Chip, thermal and PMIC	k	hakios.thermal.c
+ TORCH	arg	torch	Haptics and torch	kl	hakios.torch.c,loader.c	a look, reading only: the arbiter's channel for the module and who may write through it, the module's type, its registers, the PMIC's temperature
+ TORCH_MAX_S	arg	torch_max_s	Haptics and torch	k	hakios.torch.c	
+ TORCH_SECS	arg	torch_secs	Haptics and torch	k	hakios.torch.c	
++TOUCH791	arg	touch791	Touch and buttons	k	hakios.s6sy791.c	turns the driver on: the pins, the two rails by RPMh, reset, boot, then its events
++TOUCH791_POLL	arg	touch791_poll	Touch and buttons	k	hakios.s6sy791.c	polls the report line every 10 ms instead of taking its interrupt
+ TOUCH_FLIP	arg	touch_flip	Touch and buttons	k	hakios.goodix.c	
+-TOUCH_LAT	arg	touch_lat	GPU and display	ku	HakiosMetalCA.m,MiniIOMobileFramebuffer.cpp,eagl.c,hakios.goodix.c,hakios.gpu.cpp,hakios.input.c,inject.c,inject_sb.c	a line for every wait of a program's for the GPU that took a millisecond or more ("tl: f KIND US at US"), for telling apart what holds a frame up
++TOUCH_LAT	arg	touch_lat	GPU and display	ku	HakiosMetalCA.m,MiniIOMobileFramebuffer.cpp,eagl.c,hakios.goodix.c,hakios.gpu.cpp,hakios.input.c,hakios.s6sy791.c,inject.c,inject_sb.c	a line for every wait of a program's for the GPU that took a millisecond or more ("tl: f KIND US at US"), for telling apart what holds a frame up
+ TOUCH_POLL_US	arg	touch_poll_us	Touch and buttons	k	hakios.goodix.c	
+ TOUCH_RATE	arg	touch_rate	Touch and buttons	k	hakios.goodix.c	the chip reports twice as often (Xiaomi's game mode; 240 otherwise)
+ TOUCH_SPI_HZ	arg	touch_spi_hz	Touch and buttons	k	hakios.goodix.c	the bus at N Hz (Android's device tree gives the chip 5 MHz)
+diff --git a/docs/boot-args.md b/docs/boot-args.md
+index 0b2df4c..ed17309 100644
+--- a/docs/boot-args.md
++++ b/docs/boot-args.md
+@@ -2,7 +2,7 @@
+ 
+ Made by `tools/boot-args.py --markdown`; CI fails if it is out of date with the source (`tools/boot-args.py --check`).
+ 
+-Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **350 arguments**: 279 read by the kernel, 14 by the loader, 68 by user space (one is read in more than one place).
++Every argument that the kernel, the loader or user space of this port reads, and which file reads it. **352 arguments**: 281 read by the kernel, 14 by the loader, 68 by user space (one is read in more than one place).
+ 
+ This is a catalogue of what exists and who reads it, not a manual. What an argument means is in the head of the file that reads it. The stable switches have a symbol in the configuration (`tools/hakios-config.py help SYMBOL`, `docs/configs.md`); the rest are the knobs of bring-up (a driver's steps, pauses, traces, test modes) and can change with the driver. Any of them can be given in a configuration with `CONFIG_BOOTARGS="name=value ..."`, which checks that each name is in this list. What the arguments of the two Metal paths do: [Metal on the Adreno](reference/metal.md#boot-arguments).
+ 
+@@ -88,7 +88,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
+ | `surf_wrap` | K | `MiniIOSurface.cpp` | `CONFIG_SURF_WRAP` |  |
+ | `surftrace` | K | `MiniIOSurface.cpp` | `CONFIG_SURFTRACE` |  |
+ | `surftrace_of` | K | `MiniIOSurface.cpp` | `CONFIG_SURFTRACE_OF` |  |
+-| `touch_lat` | KU | `HakiosMetalCA.m`, `MiniIOMobileFramebuffer.cpp`, `eagl.c`, `hakios.goodix.c`, `hakios.gpu.cpp`, `hakios.input.c`, `inject.c`, `inject_sb.c` | `CONFIG_TOUCH_LAT` |  |
++| `touch_lat` | KU | `HakiosMetalCA.m`, `MiniIOMobileFramebuffer.cpp`, `eagl.c`, `hakios.goodix.c`, `hakios.gpu.cpp`, `hakios.input.c`, `hakios.s6sy791.c`, `inject.c`, `inject_sb.c` | `CONFIG_TOUCH_LAT` |  |
+ | `vblur` | U | `eagl.c` | `CONFIG_VBLUR` |  |
+ 
+ ## Security stand-ins (1)
+@@ -247,7 +247,7 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
+ | `cam_shutter` | K | `hakios.camera.c` | `CONFIG_CAM_SHUTTER` |  |
+ | `cam_vblank` | K | `hakios.camera.c` | `CONFIG_CAM_VBLANK` |  |
+ 
+-## Touch and buttons (10)
++## Touch and buttons (12)
+ 
+ | Argument | Layer | Read by | Configuration | Set by |
+ |---|---|---|---|---|
+@@ -255,6 +255,8 @@ Layers: **K** the kernel, **L** the loader, **U** user space (through `sysctl ke
+ | `buttons_steps` | K | `hakios.buttons.c` | `CONFIG_BUTTONS_STEPS` |  |
+ | `press_power` | K | `hakios.buttons.c` | `CONFIG_PRESS_POWER` |  |
+ | `press_power_ms` | K | `hakios.buttons.c` | `CONFIG_PRESS_POWER_MS` |  |
++| `touch791` | K | `hakios.s6sy791.c` | `CONFIG_TOUCH791` |  |
++| `touch791_poll` | K | `hakios.s6sy791.c` | `CONFIG_TOUCH791_POLL` |  |
+ | `touch_flip` | K | `hakios.goodix.c` | `CONFIG_TOUCH_FLIP` |  |
+ | `touch_poll_us` | K | `hakios.goodix.c` | `CONFIG_TOUCH_POLL_US` |  |
+ | `touch_rate` | K | `hakios.goodix.c` | `CONFIG_TOUCH_RATE` |  |
+diff --git a/drivers/core/hakios.stubs.c b/drivers/core/hakios.stubs.c
+index ed5ca7f..71fd9aa 100644
+--- a/drivers/core/hakios.stubs.c
++++ b/drivers/core/hakios.stubs.c
+@@ -41,6 +41,10 @@ void hakios_virtio_input_init(void) {}
+ void hakios_goodix_init(void) {}
+ #endif
+ 
++#ifndef HAKIOS_S6SY791
++void hakios_s6sy791_init(void) {}
++#endif
++
+ #ifndef HAKIOS_BUTTONS
+ void hakios_buttons_init(void) {}
+ #endif
+diff --git a/drivers/input/conf b/drivers/input/conf
+index 63d10a4..f192a99 100644
+--- a/drivers/input/conf
++++ b/drivers/input/conf
+@@ -14,6 +14,11 @@ driver GOODIX
+ 	help    the touch screen: a Goodix GT9916 ("Berlin-D") or a FocalTech FT3680 on SPI (touchscreen=1). The bus,
+ 	help    pins and supplies are the POCO X5 Pro's; another phone with one of these controllers changes those
+ 
++driver S6SY791
++	file    bsd/dev/hakios.s6sy791.c
++	help    the touch screen: a Samsung S6SY791 at I2C 0x48 on two TLMM pins, driven by hand (touch791=1). The
++	help    pins, supplies and interrupt are the OnePlus 8 Pro's (IN2020); nothing happens without touch791=1
++
+ driver BUTTONS
+ 	file    bsd/dev/hakios.buttons.c
+ 	help    the power and volume keys, read from the PMIC through the SPMI arbiter (buttons=1)
+diff --git a/drivers/input/hakios.input.c b/drivers/input/hakios.input.c
+index 8452a55..6c27f00 100644
+--- a/drivers/input/hakios.input.c
++++ b/drivers/input/hakios.input.c
+@@ -284,6 +284,7 @@ hakios_input_init(void)
+ 	hakios_cpufreq_init();
+ 	hakios_virtio_input_init();
+ 	hakios_goodix_init();
++	hakios_s6sy791_init();
+ 	hakios_buttons_init();
+ 	hakios_battery_init();
+ 	hakios_ufs_init();
+diff --git a/drivers/input/hakios.s6sy791.c b/drivers/input/hakios.s6sy791.c
+new file mode 100644
+index 0000000..2a8debd
+--- /dev/null
++++ b/drivers/input/hakios.s6sy791.c
+@@ -0,0 +1,830 @@
++/*
++ * The touch screen of the OnePlus 8 Pro (instantnoodlep, IN2020): a Samsung S6SY791 at I2C address
++ * 0x48, as a source of touches for /dev/hakios-touch (sys/hakios.input.h). Only with boot-arg
++ * touch791=1: every address below belongs to this phone, and no line of it has run in this kernel
++ * yet (the head of drivers/input/hakios.goodix.c says the same of its own phone).
++ *
++ * touch791=1: turns the driver on: the pins, the two rails by RPMh, reset, boot, then its events.
++ * touch791_poll=1: polls the report line every 10 ms instead of taking its interrupt.
++ * touch_lat=1 adds a "tl:" line for every read that found something (hakios.input.c's switch).
++ *
++ * Where each part comes from, and what was verified where:
++ *   - The wiring and the chip's protocol were verified on this phone, twice.
++ *       (a) dekefake's OnePlus 8 tree, bsd/dev/instantnoodle_touch.c, driven on this phone with no
++ *           change but the panel size (its INSTANTNOODLEP-PLAN.md addendum 8, 2026-10-26: the owner
++ *           opened Notes): the S6SY791 answers at the S6SY761's address on the same bus (SE13,
++ *           i2c@a94000, pins gpio36/37 driven by hand), behind the same reset (TLMM 38) and report
++ *           line (TLMM 39), on the same rails (RPMh "ldoc1" 1.8 V, "ldoa13" 3.008 V), and speaks
++ *           the S6SY761's 8-byte sec_ts event format for touches.
++ *       (b) the instantnoodlep reference package (ports/instantnoodlep/touch/, round 90, a UEFI
++ *           loader-side probe): device id ac 37 91 at 0x52, boot status 0x20 (application mode) at
++ *           0x55, the boot-complete event as the S6SY761's (byte 0 status 2 or 7, byte 1 == 0), and
++ *           a 20-second capture of real fingers after only SENSE_ON (0x10): 91 down, 2610 moves,
++ *           91 up, not one malformed record. Raw coordinates are 12-bit over 1439 x 3168.
++ *   - The structure is this tree's Goodix driver's; the I2C by hand and the RPMh writes are the
++ *     OnePlus 8's (instantnoodle_i2c.c, instantnoodle_touch.c, proven on the same SoC); the chip's
++ *     registers, identity gate and event decode are the reference package's (s6sy791_events.c:
++ *     GPL-2.0-only, provenance LineageOS android_kernel_oneplus_sm8250 commit 98a7970,
++ *     sec_drivers_s6sy791.h; s6sy791_ready_probe.inc, s6sy791_powered_id.inc).
++ *
++ * Firmware: none is loaded. The S6SY791 starts its factory application by itself after reset
++ * (boot status 0x20 read on this phone, reference round 90; the OnePlus 8's S6SY761 the same,
++ * instantnoodle_touch.c's wait_boot_complete()). No calibration or persistent configuration is
++ * written; TOUCH_FUNC and SENSE_ON are sent and their not being acknowledged is tolerated (they
++ * were not acknowledged on the OnePlus 8, instantnoodle_touch.c, and touches came anyway; on the
++ * 8 Pro the reference's SENSE_ON write was acknowledged).
++ *
++ * The report line is taken as the TLMM south tile's summary interrupt (GIC SPI 240), level low,
++ * with a 100 ms watchdog and a fall back to looking every 10 ms (touch791_poll=1 forces that
++ * polling; an interrupt that is never owned by a report leaves it masked and polls instead, as
++ * the OnePlus 8's driver does). There is no screen-off hook in this kernel yet: the chip is
++ * started once and left scanning (the OnePlus 8's driver puts it in reset while the display is
++ * dark: instantnoodle_touch.c's instantnoodle_touch_display(), from a hook this tree has not).
++ *
++ * Registers and event layout: Linux drivers/input/touchscreen/s6sy761.c and the vendor's
++ * sec_ts/S6SY791 driver; pins: Linux pinctrl-sm8250.c (the SOUTH tile at 0x0f500000, a pin's
++ * registers 0x1000 * pin); supplies and sequencer: Linux drivers/soc/qcom/{rpmh-rsc,cmd-db}.c.
++ */
++#include <kern/clock.h>
++#include <kern/locks.h>
++#include <kern/sched_prim.h>
++#include <kern/thread.h>
++#include <libkern/libkern.h>
++#include <mach/mach_types.h>
++#include <pexpert/pexpert.h>
++#include <sys/errno.h>
++#include <sys/hakios.input.h>
++#include <sys/systm.h>
++
++extern void hakios_tl(const char *format, ...) __printflike(1, 2);
++
++extern vm_offset_t ml_io_map(vm_offset_t phys_addr, vm_size_t size);
++extern vm_offset_t ml_io_map_wcomb(vm_offset_t phys_addr, vm_size_t size);
++extern kern_return_t thread_terminate(thread_t thread);
++
++/* RPMh's sequencer (TCS 0 of the RSC): the audio DSP's and the modem's drivers write the same
++ * slots, so every request goes through this lock (drivers/core/hakios.platform.c). */
++extern lck_mtx_t hakios_rsc_lock;
++
++/* The interrupt of one more line of the GIC the kernel already drives (osfmk/arm64/gic_v3_irq.c;
++ * drivers/wifi/hakios.lx.c attaches the radio's the same way). */
++extern kern_return_t gic_v3_spi_attach(uint32_t intid, bool edge,
++    void (*handler)(void *context, uint32_t intid), void *context);
++extern void gic_v3_spi_mask(uint32_t intid);
++extern void gic_v3_spi_unmask(uint32_t intid);
++extern void gic_v3_spi_detach(uint32_t intid);
++/* Above the kernel's default: at high frame rates the display's copying threads hold the
++ * processors, and at their priority a touch waited up to 7 ms to be read on the OnePlus 8
++ * (instantnoodle_touch.c, which starts its thread at 92 for that reason; this is the same kernel
++ * release, so the same call). */
++extern kern_return_t kernel_thread_start_priority(thread_continue_t continuation, void *parameter,
++    integer_t priority, thread_t *new_thread);
++
++static inline uint32_t
++rd(vm_offset_t address)
++{
++	return *(volatile uint32_t *)address;
++}
++
++static inline void
++wr(vm_offset_t address, uint32_t value)
++{
++	*(volatile uint32_t *)address = value;
++	__asm__ volatile ("dsb osh" ::: "memory");
++}
++
++static void
++sleep_us(uint32_t us)
++{
++	delay_for_interval(us, NSEC_PER_USEC);
++}
++
++static void
++sleep_ms(uint32_t ms)
++{
++	delay_for_interval(ms, NSEC_PER_MSEC);
++}
++
++static uint64_t
++micros(uint64_t absolute)
++{
++	uint64_t ns;
++
++	absolutetime_to_nanoseconds(absolute, &ns);
++	return ns / NSEC_PER_USEC;
++}
++
++/* ---- pins (the SM8250 TLMM's SOUTH tile; Linux pinctrl-sm8250.c) ------------------------------- */
++
++/*
++ * The four pins of the touch screen sit together on one 16 KB page of the tile (pins 36-39 are
++ * chunk 9 of 4 pins each): one mapping serves the bus, the reset and the report line, and keeps
++ * the kernel's 8 MB I/O window small, as the OnePlus 8's pin_base() maps its chunks for the same
++ * reason (instantnoodle_i2c.c; its 2026-10-27 note: a whole tile once took the last megabyte of
++ * that window and the camera's mapping failed). Chunk-relative numbers below: 0 is gpio36.
++ */
++#define TLMM_SOUTH_BASE         0x0f500000UL
++#define CHUNK_FIRST_PIN         36
++#define CHUNK_SIZE              (0x1000UL * 4)
++#define PIN_SDA                 0               /* gpio36 */
++#define PIN_SCL                 1               /* gpio37 */
++#define PIN_RESET               2               /* gpio38; low = the chip is in reset */
++#define PIN_IRQ                 3               /* gpio39; low = the chip has a report */
++#define PIN_ADDR(n)             (tlmm + 0x1000UL * (n))
++
++/* a pin's CFG register: [1:0] pull, [5:2] function, [8:6] drive strength (2 mA steps), [9] output
++ * enable; IN_OUT at +4: bit 0 the level in, bit 1 the level out (Linux pinctrl-msm.c) */
++#define CFG_PULL_NONE           0
++#define CFG_PULL_UP             3
++#define CFG_OUTPUT              (1u << 9)
++#define IO_OUT_HIGH             2
++
++/* the report line's interrupt: the south tile's summary, GIC SPI 240 (TLMM 208 + 32; the same
++ * line the OnePlus 8's driver takes, verified on that phone 2026-10-23, instantnoodle_touch.c) */
++#define GIC_TLMM_SOUTH_IRQ      (208 + 32)
++#define IRQ_ENABLE              (1u << 0)
++#define IRQ_CONFIG              8               /* [9:5] target, [4] raw status, [3:2] polarity */
++#define IRQ_STATUS              12              /* write-zero-to-clear */
++
++static vm_offset_t tlmm, rsc, cmd_db;
++static uint32_t touch791_poll, touch_lat;
++static bool use_irq = true;
++static unsigned events, bus_errors;
++
++static void
++configure(unsigned pin, unsigned pull, unsigned ma, bool output)
++{
++	wr(PIN_ADDR(pin), pull | 0u << 2 | (ma / 2 - 1) << 6 | (output ? CFG_OUTPUT : 0));
++}
++
++static void
++gpio_input(unsigned pin, unsigned pull)
++{
++	configure(pin, pull, 2, false);
++}
++
++static void
++gpio_output(unsigned pin, bool high, unsigned pull, unsigned ma)
++{
++	wr(PIN_ADDR(pin) + 4, high ? IO_OUT_HIGH : 0);  /* the level first, so that the pin never drives the wrong one */
++	configure(pin, pull, ma, true);
++}
++
++static bool
++gpio_level(unsigned pin)
++{
++	return rd(PIN_ADDR(pin) + 4) & 1;
++}
++
++/* ---- I2C on the two pins, by hand --------------------------------------------------------------- */
++
++/*
++ * The bus is open drain (low = output 0, high = input, the board's pull-ups make the level), about
++ * 100 kHz. The SoC's serial engine 13 is not used: its FIFO path is off on these phones and the DMA
++ * mode needs GPI (the OnePlus 8's sys/instantnoodle.h). The OnePlus 8's bit-bang is copied
++ * (instantnoodle_i2c.c): it has carried this port's touch, fuel gauge, haptic and camera traffic on
++ * both phones.
++ */
++static LCK_GRP_DECLARE(bus_lck_grp, "s6sy791-i2c");
++static LCK_MTX_DECLARE(bus_lock, &bus_lck_grp);
++
++#define TS_ADDR                 0x48
++
++static void
++line(unsigned pin, bool high)
++{
++	if (high) {
++		gpio_input(pin, CFG_PULL_NONE);         /* released: the pull-ups make the level */
++	} else {
++		wr(PIN_ADDR(pin) + 4, 0);
++		configure(pin, CFG_PULL_NONE, 2, true); /* driven low */
++	}
++}
++
++static void
++bb_delay(void)
++{
++	delay(4);
++}
++
++/* SCL let go, and held there until it is high: a target may hold it low while it works (clock
++ * stretching). 0, or ETIMEDOUT after 25 ms (instantnoodle_i2c.c's scl_high). */
++static int
++scl_high(void)
++{
++	line(PIN_SCL, true);
++	for (unsigned us = 0; !gpio_level(PIN_SCL); us++) {
++		if (us == 25000) {
++			return ETIMEDOUT;
++		}
++		delay(1);
++	}
++	return 0;
++}
++
++static void
++bb_start(void)
++{
++	line(PIN_SDA, true);
++	scl_high();
++	bb_delay();
++	line(PIN_SDA, false);
++	bb_delay();
++	line(PIN_SCL, false);
++	bb_delay();
++}
++
++static void
++bb_stop(void)
++{
++	line(PIN_SDA, false);
++	bb_delay();
++	scl_high();
++	bb_delay();
++	line(PIN_SDA, true);
++	bb_delay();
++}
++
++/* the byte, then 0 if the target pulled SDA low for it */
++static int
++bb_tx(uint8_t byte)
++{
++	int nack;
++
++	for (int i = 7; i >= 0; i--) {
++		line(PIN_SDA, (byte >> i) & 1);
++		bb_delay();
++		scl_high();
++		bb_delay();
++		line(PIN_SCL, false);
++		bb_delay();
++	}
++	line(PIN_SDA, true);
++	bb_delay();
++	if (scl_high() != 0) {
++		line(PIN_SCL, false);
++		return ETIMEDOUT;
++	}
++	bb_delay();
++	nack = gpio_level(PIN_SDA);
++	line(PIN_SCL, false);
++	bb_delay();
++	return nack ? ENXIO : 0;
++}
++
++static uint8_t
++bb_rx(bool ack)
++{
++	uint8_t v = 0;
++
++	line(PIN_SDA, true);
++	for (int i = 7; i >= 0; i--) {
++		bb_delay();
++		scl_high();
++		bb_delay();
++		v = (uint8_t)(v << 1 | gpio_level(PIN_SDA));
++		line(PIN_SCL, false);
++	}
++	line(PIN_SDA, !ack);
++	bb_delay();
++	scl_high();
++	bb_delay();
++	line(PIN_SCL, false);
++	line(PIN_SDA, true);
++	bb_delay();
++	return v;
++}
++
++static int
++ts_write(const uint8_t *tx, unsigned n)
++{
++	int err;
++
++	lck_mtx_lock(&bus_lock);
++	bb_start();
++	err = bb_tx((uint8_t)(TS_ADDR << 1));
++	for (unsigned i = 0; i < n && err == 0; i++) {
++		err = bb_tx(tx[i]);
++	}
++	bb_stop();
++	lck_mtx_unlock(&bus_lock);
++	if (err) {
++		bus_errors++;
++	}
++	return err;
++}
++
++static int
++ts_read(uint8_t reg, uint8_t *buf, unsigned n)
++{
++	int err;
++
++	lck_mtx_lock(&bus_lock);
++	bb_start();
++	err = bb_tx((uint8_t)(TS_ADDR << 1));
++	if (err == 0) {
++		err = bb_tx(reg);
++	}
++	if (err == 0) {
++		bb_start();                             /* repeated start */
++		err = bb_tx((uint8_t)(TS_ADDR << 1 | 1));
++	}
++	for (unsigned i = 0; i < n && err == 0; i++) {
++		buf[i] = bb_rx(i + 1 < n);
++	}
++	bb_stop();
++	lck_mtx_unlock(&bus_lock);
++	if (err) {
++		bus_errors++;
++	}
++	return err;
++}
++
++/* nine clocks and a stop: a target holding SDA lets go (instantnoodle_i2c.c's recover) */
++static void
++ts_recover(void)
++{
++	lck_mtx_lock(&bus_lock);
++	line(PIN_SDA, true);
++	for (int i = 0; i < 9; i++) {
++		line(PIN_SCL, false);
++		bb_delay();
++		line(PIN_SCL, true);
++		bb_delay();
++	}
++	bb_stop();
++	lck_mtx_unlock(&bus_lock);
++}
++
++/* ---- the supplies (RPMh), as hakios.goodix.c ------------------------------------------------------ */
++
++#define CMD_DB_PHYS             0x80860000UL
++#define CMD_DB_SIZE             0x20000UL
++#define RSC_PHYS                0x18220000UL    /* the application processor's "DRV 2" */
++#define RSC_SIZE                0x10000UL
++#define TCS(reg)                (rsc + 0xd00 + (reg))           /* command slot set 0, an "active" one */
++#define TCS_IRQ_ENABLE          0x00
++#define TCS_IRQ_STATUS          0x04
++#define TCS_IRQ_CLEAR           0x08
++#define TCS_WAIT_FOR_COMPLETION 0x10
++#define TCS_CONTROL             0x14
++#define TCS_CONTROL_ENABLE      (1u << 16)
++#define TCS_CONTROL_TRIGGER     (1u << 24)
++#define TCS_STATUS              0x18            /* 0 while busy */
++#define TCS_CMD_ENABLE          0x1c
++#define TCS_CMD_MSGID(n)        (0x30 + 20 * (n))
++#define TCS_CMD_ADDR(n)         (0x34 + 20 * (n))
++#define TCS_CMD_DATA(n)         (0x38 + 20 * (n))
++#define MSGID_WRITE_4_BYTES     0x10008
++#define MSGID_RESPONSE          0x100
++#define VRM_VOLTAGE             0
++#define VRM_ENABLE              4
++#define VRM_MODE                8
++#define VRM_MODE_LDO_HPM        7
++
++struct cmd_db_slave {
++	uint16_t id, header_offset, data_offset, count, version, reserved[3];
++};
++struct cmd_db_header {
++	uint32_t version;
++	uint8_t magic[4];
++	struct cmd_db_slave slave[8];
++	uint32_t checksum, reserved;
++	uint8_t data[];
++};
++struct cmd_db_entry {
++	char id[8];
++	uint32_t priority[2];
++	uint32_t address;
++	uint16_t length, offset;
++};
++
++/* The RPMh address of a resource by its name in the command database the boot loader left; 0 = none
++ * (hakios.goodix.c's rpmh_address; the OnePlus 8's rpmh_entry(), whose strncmp of 8 bytes is kept:
++ * its strlcpy cut 8-character names to 7 and never found them, a bug fixed there in the end). */
++static uint32_t
++rpmh_address(const char *name)
++{
++	const struct cmd_db_header *db = (const struct cmd_db_header *)cmd_db;
++	char id[8] = { 0 };
++
++	if (cmd_db == 0 || db->magic[0] != 0xdb || db->magic[1] != 0x30 || db->magic[2] != 0x03 || db->magic[3] != 0x0c) {
++		printf("s6sy791: no command database (magic %02x %02x %02x %02x)\n", cmd_db == 0 ? 0 : db->magic[0],
++		    cmd_db == 0 ? 0 : db->magic[1], cmd_db == 0 ? 0 : db->magic[2], cmd_db == 0 ? 0 : db->magic[3]);
++		return 0;
++	}
++	strncpy(id, name, sizeof(id));       /* 8 bytes with no terminator when the name has 8 characters */
++	for (unsigned s = 0; s < 8; s++) {
++		const struct cmd_db_slave *slave = &db->slave[s];
++		const struct cmd_db_entry *entry = (const struct cmd_db_entry *)(db->data + slave->header_offset);
++
++		if (slave->id == 0 || slave->header_offset >= CMD_DB_SIZE - 0x1000 || slave->count > 512) {
++			continue;
++		}
++		for (unsigned i = 0; i < slave->count; i++) {
++			if (memcmp(entry[i].id, id, sizeof(id)) == 0) {
++				return entry[i].address;
++			}
++		}
++	}
++	return 0;
++}
++
++static bool
++rpmh_wait(uint32_t reg, uint32_t mask, uint32_t value, const char *what)
++{
++	for (int i = 0; i < 2000; i++) {
++		if ((rd(TCS(reg)) & mask) == value) {
++			return true;
++		}
++		sleep_us(100);
++	}
++	printf("s6sy791: RPMh: timeout waiting for %s (register %#x = %#x)\n", what, reg, rd(TCS(reg)));
++	return false;
++}
++
++/* Send up to three register writes to RPMh and wait until they are done (hakios.goodix.c's
++ * rpmh_write, under the lock the other writers of these slots take). */
++static bool
++rpmh_write(const uint32_t *address, const uint32_t *data, unsigned count)
++{
++	uint32_t irq_enable;
++	bool done;
++
++	lck_mtx_lock(&hakios_rsc_lock);
++	irq_enable = rd(TCS(TCS_IRQ_ENABLE));
++	for (int i = 0; rd(TCS(TCS_STATUS)) == 0; i++) {
++		if (i > 2000) {
++			printf("s6sy791: RPMh: the command slots stay busy\n");
++			lck_mtx_unlock(&hakios_rsc_lock);
++			return false;
++		}
++		sleep_us(100);
++	}
++	wr(TCS(TCS_CONTROL), rd(TCS(TCS_CONTROL)) & ~TCS_CONTROL_TRIGGER);
++	wr(TCS(TCS_CONTROL), rd(TCS(TCS_CONTROL)) & ~TCS_CONTROL_ENABLE);
++	wr(TCS(TCS_IRQ_CLEAR), 1);
++	for (unsigned i = 0; i < count; i++) {
++		wr(TCS(TCS_CMD_MSGID(i)), MSGID_WRITE_4_BYTES | MSGID_RESPONSE);
++		wr(TCS(TCS_CMD_ADDR(i)), address[i]);
++		wr(TCS(TCS_CMD_DATA(i)), data[i]);
++	}
++	wr(TCS(TCS_WAIT_FOR_COMPLETION), (1u << count) - 1);
++	wr(TCS(TCS_CMD_ENABLE), (1u << count) - 1);
++	wr(TCS(TCS_IRQ_ENABLE), irq_enable | 1);
++	wr(TCS(TCS_CONTROL), TCS_CONTROL_ENABLE);
++	wr(TCS(TCS_CONTROL), TCS_CONTROL_ENABLE | TCS_CONTROL_TRIGGER);
++
++	done = rpmh_wait(TCS_IRQ_STATUS, 1, 1, "the request");
++	wr(TCS(TCS_CONTROL), rd(TCS(TCS_CONTROL)) & ~TCS_CONTROL_TRIGGER);
++	wr(TCS(TCS_CONTROL), rd(TCS(TCS_CONTROL)) & ~TCS_CONTROL_ENABLE);
++	wr(TCS(TCS_CMD_ENABLE), 0);
++	wr(TCS(TCS_WAIT_FOR_COMPLETION), 0);
++	wr(TCS(TCS_IRQ_CLEAR), 1);
++	wr(TCS(TCS_IRQ_ENABLE), irq_enable);
++	lck_mtx_unlock(&hakios_rsc_lock);
++	return done;
++}
++
++/* One LDO on: its voltage, its high-power mode and the enable (a regulator's three VRM registers,
++ * as the OnePlus 8's instantnoodle_supply_on() and hakios.goodix.c's io_supply_on() do). */
++static bool
++supply_on(const char *name, uint32_t mv)
++{
++	uint32_t base = cmd_db == 0 ? 0 : rpmh_address(name);
++	uint32_t address[3] = { base + VRM_VOLTAGE, base + VRM_MODE, base + VRM_ENABLE };
++	uint32_t data[3] = { mv, VRM_MODE_LDO_HPM, 1 };
++
++	/* addresses of regulators ("VRM") have 4 in bits 19:16; anything else is not what we are looking for */
++	if (base == 0 || (base >> 16 & 0xf) != 4) {
++		printf("s6sy791: RPMh: no regulator \"%s\" (address %#x)\n", name, base);
++		return false;
++	}
++	if (!rpmh_write(address, data, 3)) {
++		return false;
++	}
++	printf("s6sy791: %s on, %u mV (at %#x)\n", name, mv, base);
++	return true;
++}
++
++/* ---- the S6SY791 ---------------------------------------------------------------------------------- */
++
++/*
++ * The registers and the event layout are the S6SY761's (Linux s6sy761.c; the vendor's sec_
++ * drivers_s6sy791.h for this chip): verified on this phone by the two sources in the head. The
++ * identity is this chip's own: ac 37 91 (the reference package's identity gate, round 90; the
++ * OnePlus 8's driver only logs its S6SY761's id).
++ */
++#define CMD_SENSE_ON            0x10
++#define CMD_FW_INTEGRITY        0x21
++#define CMD_TOUCH_FUNC          0x30
++#define CMD_DEVICE_ID           0x52
++#define CMD_BOOT_STATUS         0x55
++#define CMD_READ_EVENT          0x60
++#define CMD_READ_ALL            0x61
++#define EVENT_LEN               8
++#define EVENT_INFO              0x02
++#define EVENT_VENDOR            0x07
++#define ACK_BOOT_COMPLETE       0x00
++#define MAX_FINGERS             10
++#define EVENT_COUNT             32      /* byte 7's low six bits say how many wait; more than 31 is nonsense */
++#define BOOT_STATUS_APP         0x20    /* the application is running (the reference's ready probe) */
++/* the panel's raw coordinates: touchpanel,panel-coords = <0x59f 0xc60> in the phone's device tree
++ * (1439 x 3168; the reference decodes against 1438 x 3167, and round 90's 91 down, 2610 moves and
++ * 91 up were all inside) */
++#define RAW_MAX_X               1438
++#define RAW_MAX_Y               3167
++
++static const uint8_t chip_id[3] = { 0xac, 0x37, 0x91 };
++
++static struct {
++	uint32_t x, y;
++	bool down;
++} finger[MAX_FINGERS];
++
++/* a raw coordinate onto 0..65535 over [0, max] (the reference's s6sy791_normalize_coordinate, whose
++ * value beyond the maximum the OnePlus 8's scale() clamps instead of dropping: a finger at the edge
++ * stays an event) */
++static uint32_t
++scale(uint32_t v, uint32_t max)
++{
++	if (v > max) {
++		v = max;
++	}
++	return (uint32_t)(((uint64_t)v * 65535u) / max);
++}
++
++static void
++handle_event(const uint8_t *ev)
++{
++	unsigned id, state;
++	uint32_t x, y;
++
++	if (ev[0] == 0 || (ev[0] & 3) != 0) {
++		return;                                 /* status, information or vendor events */
++	}
++	id = (ev[0] >> 2 & 0xf);
++	if (id == 0 || id > MAX_FINGERS) {
++		return;
++	}
++	id--;
++	state = ev[0] >> 6;
++	/* sec_event_coordinate: the low nibble of x in byte 3's high half, of y in its low half (the
++	 * reference's s6sy791_decode_coordinate_event; the OnePlus 8's handle_event, the same) */
++	x = (uint32_t)ev[1] << 4 | ev[3] >> 4;
++	y = (uint32_t)ev[2] << 4 | (ev[3] & 0xf);
++	switch (state) {
++	case 1:                                         /* press */
++	case 2:                                         /* move */
++		finger[id].x = scale(x, RAW_MAX_X);
++		finger[id].y = scale(y, RAW_MAX_Y);
++		hakios_touch_post(finger[id].down ? HAKIOS_TOUCH_MOVE : HAKIOS_TOUCH_DOWN, id, finger[id].x, finger[id].y);
++		if (!finger[id].down) {
++			printf("s6sy791: finger %u down at %u,%u\n", id, x, y);
++		}
++		finger[id].down = true;
++		events++;
++		break;
++	case 3:                                         /* release */
++		if (finger[id].down) {
++			finger[id].down = false;
++			hakios_touch_post(HAKIOS_TOUCH_UP, id, finger[id].x, finger[id].y);
++			events++;
++		}
++		break;
++	}
++}
++
++static int
++poll_events(void)
++{
++	uint8_t ev[EVENT_LEN], stack[(EVENT_COUNT - 1) * EVENT_LEN];
++	unsigned left;
++	int err = ts_read(CMD_READ_EVENT, ev, sizeof(ev));
++
++	if (err) {
++		return err;
++	}
++	if (ev[0] == 0) {
++		return 0;                               /* an empty report */
++	}
++	left = ev[7] & 0x3f;
++	if (left >= EVENT_COUNT) {
++		return EOVERFLOW;
++	}
++	if (left) {
++		err = ts_read(CMD_READ_ALL, stack, left * EVENT_LEN);
++		if (err) {
++			return err;
++		}
++	}
++	handle_event(ev);
++	for (unsigned i = 0; i < left; i++) {
++		handle_event(&stack[i * EVENT_LEN]);
++	}
++	return 0;
++}
++
++static void
++release_all(void)
++{
++	for (unsigned i = 0; i < MAX_FINGERS; i++) {
++		if (finger[i].down) {
++			finger[i].down = false;
++			hakios_touch_post(HAKIOS_TOUCH_UP, i, finger[i].x, finger[i].y);
++		}
++	}
++}
++
++/* The boot-complete event: an information or vendor event whose second byte is ACK_BOOT_COMPLETE
++ * (the OnePlus 8's wait_boot_complete(); the reference checks the same status bits 2 and 7 and in
++ * addition byte 0's low bits being 1 -- all its captures had them set, but the OnePlus 8's check,
++ * without that, is what ran on both phones, so it is kept). */
++static int
++wait_boot_complete(void)
++{
++	uint8_t ev[EVENT_LEN];
++
++	for (int i = 0; i < 100; i++) {          /* the reference polled 101 times, 20 ms apart */
++		if (ts_read(CMD_READ_EVENT, ev, sizeof(ev)) == 0) {
++			unsigned status = ev[0] >> 2 & 0xf;
++
++			if ((status == EVENT_INFO || status == EVENT_VENDOR) && ev[1] == ACK_BOOT_COMPLETE) {
++				return 0;
++			}
++		}
++		sleep_ms(20);
++	}
++	return -1;
++}
++
++/* ---- the report line's interrupt ------------------------------------------------------------------ */
++
++static uint64_t irq_time;
++
++/* The I2C transfer sleeps and takes a mutex; only mask and wake here. */
++static void
++touch_irq(void *context __unused, uint32_t intid)
++{
++	gic_v3_spi_mask(intid);
++	__atomic_store_n(&irq_time, mach_absolute_time(), __ATOMIC_RELEASE);
++	thread_wakeup((event_t)&irq_time);
++}
++
++/* Wait for the report line, or 100 ms without one (the watchdog that makes the poll fallback work;
++ * the OnePlus 8's wait_report(), without its screen-dark branch, which this kernel has no hook
++ * for yet). 0: no report was waiting. */
++static uint64_t
++wait_report(void)
++{
++	for (;;) {
++		uint64_t at, deadline;
++
++		clock_interval_to_deadline(100, NSEC_PER_MSEC, &deadline);
++		assert_wait_deadline((event_t)&irq_time, THREAD_UNINT, deadline);
++		at = __atomic_exchange_n(&irq_time, 0, __ATOMIC_ACQUIRE);
++		if (at != 0 || !gpio_level(PIN_IRQ)) {
++			clear_wait(current_thread(), THREAD_AWAKENED);
++			return at;
++		}
++		thread_block(THREAD_CONTINUE_NULL);
++	}
++}
++
++/* ---- all of it together --------------------------------------------------------------------------- */
++
++static void
++s6sy791_thread(void *parameter __unused, wait_result_t result __unused)
++{
++	uint8_t id[3] = { 0, 0, 0 }, boot = 0, fw = 0;
++	uint8_t func[3] = { CMD_TOUCH_FUNC, 0x01, 0 }, sense = CMD_SENSE_ON;
++	unsigned errors = 0, unowned = 0;
++	uint64_t report_since = 0;
++
++	tlmm = ml_io_map(TLMM_SOUTH_BASE + 0x1000UL * CHUNK_FIRST_PIN, CHUNK_SIZE);
++	rsc = ml_io_map(RSC_PHYS, RSC_SIZE);
++	cmd_db = ml_io_map_wcomb(CMD_DB_PHYS, CMD_DB_SIZE);      /* memory, not registers */
++	if (tlmm == 0 || rsc == 0 || cmd_db == 0) {
++		printf("s6sy791: cannot map the pins, the sequencer or the command database\n");
++		goto out;
++	}
++
++	ts_recover();                           /* both lines let go */
++	gpio_input(PIN_IRQ, CFG_PULL_NONE);     /* the report line, as the live DT has it (bias-disable) */
++	gpio_output(PIN_RESET, false, CFG_PULL_UP, 8);   /* in reset while the supplies come up */
++	/* the I/O rail first, a millisecond, then the analog one (the OnePlus 8's thread; the
++	 * reference's powered trial 5, the same order: vio, 1 ms, analog) */
++	if (!supply_on("ldoc1", 1800) || (sleep_ms(1), !supply_on("ldoa13", 3008))) {
++		printf("s6sy791: no supplies: no touch screen\n");
++		goto out;
++	}
++	sleep_ms(20);
++	gpio_output(PIN_RESET, true, CFG_PULL_UP, 8);    /* out of reset */
++	sleep_ms(70);                           /* the reference's powered trial: 70 ms before the first look */
++
++	printf("s6sy791: boot-complete event: %s\n", wait_boot_complete() == 0 ? "seen" : "NOT SEEN (going on)");
++	if (ts_read(CMD_DEVICE_ID, id, 3) != 0) {
++		printf("s6sy791: no answer at address %#x: no touch screen\n", TS_ADDR);
++		goto out;
++	}
++	if (id[0] != chip_id[0] || id[1] != chip_id[1] || id[2] != chip_id[2]) {
++		printf("s6sy791: device id %02x %02x %02x is not the S6SY791's ac 37 91: no touch screen\n", id[0], id[1], id[2]);
++		goto out;
++	}
++	ts_read(CMD_BOOT_STATUS, &boot, 1);
++	ts_read(CMD_FW_INTEGRITY, &fw, 1);
++	printf("s6sy791: S6SY791 ac 37 91, boot status %#x (%s), firmware integrity %#x\n", boot,
++	    boot == BOOT_STATUS_APP ? "application" : "NOT the application", fw);
++	/* not acknowledged on the OnePlus 8, harmless there and on this phone (the head); sent anyway */
++	(void)ts_write(func, 3);
++	(void)ts_write(&sense, 1);
++
++	if (use_irq) {
++		/* pinctrl-sm8250: target KPSS=3, raw status enabled, level low; the status register is
++		 * write-zero-to-clear (the OnePlus 8's thread, verified on that phone 2026-10-23) */
++		wr(PIN_ADDR(PIN_IRQ) + IRQ_CONFIG, (3u << 5) | (1u << 4));
++		wr(PIN_ADDR(PIN_IRQ) + IRQ_STATUS, 0);
++		if (gic_v3_spi_attach(GIC_TLMM_SOUTH_IRQ, false, touch_irq, NULL) != KERN_SUCCESS) {
++			printf("s6sy791: cannot attach TLMM interrupt %u; polling every 10 ms instead\n", GIC_TLMM_SOUTH_IRQ);
++			use_irq = false;
++		} else {
++			wr(PIN_ADDR(PIN_IRQ) + IRQ_CONFIG, rd(PIN_ADDR(PIN_IRQ) + IRQ_CONFIG) | IRQ_ENABLE);
++			printf("s6sy791: interrupt-driven, gpio39 low, GIC %u (100 ms watchdog)\n", GIC_TLMM_SOUTH_IRQ);
++		}
++	} else {
++		printf("s6sy791: polling every 10 ms (touch791_poll=1)\n");
++	}
++	report_since = mach_absolute_time();
++
++	for (;;) {
++		uint64_t detected = use_irq ? wait_report() : mach_absolute_time();
++		uint64_t began = mach_absolute_time(), done, ns;
++		unsigned before = events;
++		int err;
++
++		if (use_irq && detected != 0 && !(rd(PIN_ADDR(PIN_IRQ) + IRQ_STATUS) & 1) && gpio_level(PIN_IRQ)) {
++			unowned++;
++		} else {
++			unowned = 0;
++		}
++		if (unowned == 16) {
++			/* a stale GIC pending bit after draining: stop an unowned interrupt storm */
++			printf("s6sy791: unowned TLMM summary interrupt; leaving it masked, polling every 10 ms instead\n");
++			wr(PIN_ADDR(PIN_IRQ) + IRQ_CONFIG, rd(PIN_ADDR(PIN_IRQ) + IRQ_CONFIG) & ~IRQ_ENABLE);
++			gic_v3_spi_detach(GIC_TLMM_SOUTH_IRQ);
++			use_irq = false;
++		}
++		err = poll_events();
++		done = mach_absolute_time();
++		if (touch_lat && (events != before || err)) {
++			hakios_tl("tl: t irq %llu worker %llu done %llu events %u error %d\n",
++			    use_irq ? micros(detected) : 0, micros(began), micros(done), events - before, err);
++		}
++		if (err != 0) {
++			if (++errors == 10) {
++				release_all();
++				ts_recover();
++			}
++		} else {
++			errors = 0;
++		}
++		absolutetime_to_nanoseconds(done - report_since, &ns);
++		if (ns >= 60 * NSEC_PER_SEC) {
++			printf("s6sy791: %u events, %u bus errors so far\n", events, bus_errors);
++			report_since = done;
++		}
++		if (use_irq) {
++			/* drain new reports without a sleep; back off on bus failure before rearming */
++			if (err) {
++				sleep_ms(10);
++			}
++			wr(PIN_ADDR(PIN_IRQ) + IRQ_STATUS, 0);
++			gic_v3_spi_unmask(GIC_TLMM_SOUTH_IRQ);
++		} else {
++			sleep_ms(10);
++		}
++	}
++out:
++	thread_terminate(current_thread());
++}
++
++void
++hakios_s6sy791_init(void)
++{
++	uint32_t enabled = 0;
++	thread_t thread;
++
++	if (!PE_parse_boot_argn("touch791", &enabled, sizeof(enabled)) || !enabled) {
++		return;
++	}
++	PE_parse_boot_argn("touch791_poll", &touch791_poll, sizeof(touch791_poll));
++	PE_parse_boot_argn("touch_lat", &touch_lat, sizeof(touch_lat));
++	if (touch791_poll) {
++		use_irq = false;
++	}
++	if (kernel_thread_start_priority(s6sy791_thread, NULL, 92, &thread) == KERN_SUCCESS) {
++		thread_deallocate(thread);
++	} else {
++		printf("s6sy791: cannot start its thread\n");
++	}
++}
+diff --git a/drivers/map b/drivers/map
+index a291d3b..f1b7bd5 100644
+--- a/drivers/map
++++ b/drivers/map
+@@ -13,6 +13,7 @@ input    bsd/dev/hakios.focaltech_fw.h
+ input    bsd/dev/hakios.input.c
+ input    bsd/dev/hakios.buttons.c
+ input    bsd/dev/hakios.virtio_input.c
++input    bsd/dev/hakios.s6sy791.c
+ 
+ storage  bsd/dev/hakios.ufs.c
+ storage  bsd/dev/hakios.ufshc.c
+diff --git a/tools/boot-args.py b/tools/boot-args.py
+index 0bb311b..bd23b3c 100755
+--- a/tools/boot-args.py
++++ b/tools/boot-args.py
+@@ -66,7 +66,7 @@ GROUPS = [
+     ("Cellular", r"hakios\.(mpss|ipa|cell|nas|qmi)\."),
+     ("Audio and battery", r"hakios\.(adsp|audio|sound|speaker|mic|virtio_sound|battery|battguard)\."),
+     ("Cameras", r"hakios\.camera\."),
+-    ("Touch and buttons", r"hakios\.(goodix|input|buttons|virtio_input)\."),
++    ("Touch and buttons", r"hakios\.(goodix|s6sy791|input|buttons|virtio_input)\."),
+     ("Storage and APFS", r"hakios\.(ufs|ufshc|virtio_blk|sparse|apfs_check)\.|apfs_vfsops\."),
+     ("Network", r"hakios\.(net|virtio_net)\."),
+     ("Haptics and torch", r"hakios\.(haptic|torch)\."),
+diff --git a/xnu/files/bsd/sys/hakios.input.h b/xnu/files/bsd/sys/hakios.input.h
+index bfb7d63..7f137e0 100644
+--- a/xnu/files/bsd/sys/hakios.input.h
++++ b/xnu/files/bsd/sys/hakios.input.h
+@@ -41,6 +41,7 @@ void hakios_touch_post(uint32_t type, uint32_t finger, uint32_t x, uint32_t y);
+ void hakios_input_init(void);
+ void hakios_virtio_input_init(void);   /* boot-arg virtio_input=1: QEMU's virtio pointer and keyboard */
+ void hakios_goodix_init(void);         /* boot-arg touchscreen=1: the phone's Goodix or FocalTech touch screen */
++void hakios_s6sy791_init(void);        /* boot-arg touch791=1: the OnePlus 8 Pro's Samsung S6SY791 touch screen */
+ void hakios_buttons_init(void);        /* boot-arg buttons=1: the phone's power and volume keys */
+ void hakios_ufs_init(void);           /* ufs=2 to xnuloader: the phone's storage, read only, through the loader (ufs_shared_pa=) */
+ void hakios_ufs_report(const char *when); /* where reading the storage has spent its time so far */
+diff --git a/xnuloader/loader.c b/xnuloader/loader.c
+index 422f9d3..25a0f7d 100644
 --- a/xnuloader/loader.c
 +++ b/xnuloader/loader.c
-@@ -347,51 +347,6 @@
+@@ -347,51 +347,6 @@ static void hc_take_back(const char *when);
  static void
  write_logs(const char *klog, uint64_t klog_len)
  {
@@ -52,21 +1039,21 @@
  	compose_logs(klog, klog_len);
  }
  
-@@ -587,6 +542,13 @@
- 	 */
+@@ -588,6 +543,13 @@ static const struct platform platform_redwood = {
  	.small_cores = 0x0f,
  };
-+
+ 
 +static const struct platform platform_instantnoodlep = {
 +	.name = "instantnoodlep", .io_base = 0x00100000, .io_size = 0x3FF00000,
 +	.gic_dist = 0x17A00000, .gic_redist = 0x17A60000, .uart = 0, .log_other_cpu = 1,
 +	.cores = 8, .core_shift = 8, .small_cores = 0x0f,
 +};
 +
- 
++
  /* ------------------------------------------------------------------------ */
  
-@@ -1731,6 +1693,20 @@
+ static void
+@@ -1731,6 +1693,20 @@ hc_ms_since(uint64_t then)
  static int
  hc_list_is_uefis(void)
  {
@@ -87,11 +1074,10 @@
  	return !hc_known || (hc_rd(HC_UTRLBA) == hc_uefi_lo && hc_rd(HC_UTRLBAU) == hc_uefi_hi &&
  	       (hc_rd(HC_UTRLRSR) & 1) != 0);
  }
-@@ -1758,6 +1734,18 @@
- 
+@@ -1759,6 +1735,18 @@ hc_take_back(const char *when)
  	if (!hc_known) {
  		return;
-+	}
+ 	}
 +	/* If the kernel left its own list in the controller, the controller may be in its runtime-
 +	 * suspended (clock gated) state -- a register read would stall this core (the 2026-11-08
 +	 * wedges). Storage is done for the session either way (RAM-only logs): leave the
@@ -103,10 +1089,11 @@
 +			print("ufs: %s: the kernel's list is still in and the controller may be suspended: not touching it\n", when);
 +			return;
 +		}
- 	}
++	}
  	lo = hc_rd(HC_UTRLBA);
  	hi = hc_rd(HC_UTRLBAU);
-@@ -2158,54 +2146,8 @@
+ 	rsr = hc_rd(HC_UTRLRSR);
+@@ -2158,54 +2146,8 @@ block_poll(void)
  			s = 0x800000000000000FULL;      /* EFI_ACCESS_DENIED */
  			bytes = 0;
  		} else if (op == BLOCK_OP_WRITE || op == BLOCK_OP_WRITE_FAST || op == BLOCK_OP_FLUSH) {
@@ -163,7 +1150,7 @@
  		} else if (op == BLOCK_OP_READ) {
  			s = bio->read_blocks(bio, bio->media->media_id, lba, bytes, block_buffer);
  			/* what the controller wrote is in memory; drop whatever this core held of the buffer */
-@@ -3817,6 +3759,8 @@
+@@ -3817,6 +3759,8 @@ fb_command(char *cmd)
  			/* the kernel looks at this once a second and comes back as it does when its time is up */
  			if (busy && running_live != NULL) {
  				((struct kernel_live *)(uintptr_t)running_live)->stop = 1;
@@ -172,7 +1159,7 @@
  			}
  			fb_reply("OKAY", "");
  		} else if (starts_with(cmd, "getvar:")) {
-@@ -4345,10 +4289,31 @@
+@@ -4345,11 +4289,32 @@ efi_main(efi_handle image, efi_system_table *st)
  		SCREEN.stride = GOP->mode->info->pixels_per_scanline * 4;
  		if (SCREEN.base == 0xE1000000ULL) {
  			PLAT = &platform_redwood;
@@ -182,7 +1169,7 @@
  			ramfb_phone_screen();
  		}
  		print("display %d x %d at %x\n", (uint64_t)SCREEN.width, (uint64_t)SCREEN.height, SCREEN.base);
-+	}
+ 	}
 +	if (PLAT == &platform_instantnoodlep) {
 +		/* The dts lies about the panel geometry: ABL left the DPU scanning whatever mode Android
 +		 * used last (measured: 1080x2376, stride 4320, VIG0+VIG1 bonded at source-x 0/540, DSC
@@ -201,6 +1188,7 @@
 +			SCREEN.height = h;
 +			SCREEN.stride = stride;
 +		}
- 	}
++	}
  	print("platform %s\n", PLAT->name);
  
+ 	install_exception_hook();
