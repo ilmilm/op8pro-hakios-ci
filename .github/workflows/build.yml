@@ -172,3 +172,219 @@ jobs:
             hakios/hakios-u-boot-oneplus8pro.img
             hakios/logs/qemu-u-boot.log
           if-no-files-found: error
+
+  # The real Darwin user space: identity from the IPSW's device tree (mkidentity.sh), userland built
+  # against the unpacked 16.5 files (PREBUILT=1 REST=1), a payload that puts the loader in its USB
+  # command mode (--usb: it stays resident, xl ramdisk/run drive the session) carrying the kernel and
+  # root.apfs; system.apfs (2.5 GB) is never uploaded — it goes to the phone with `xl ramdisk` from
+  # the builder's own machine, once per loader session.
+  darwin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout this CI repository (the loader patch)
+        uses: actions/checkout@v4
+        with:
+          path: ci
+
+      - name: Checkout HakiOS common
+        uses: actions/checkout@v4
+        with:
+          repository: oosexgang/hakios-xnu-kernel
+          ref: main
+          path: hakios
+          fetch-depth: 1
+
+      - name: Checkout device port (oneplus8pro + sm8250 SoC layer)
+        uses: actions/checkout@v4
+        with:
+          repository: ilmilm/hakios-oneplus8pro
+          ref: main
+          path: hakios/devices/oneplus8pro
+
+      - name: Sync remaining device and uefi repositories
+        run: |
+          cd hakios
+          python3 tools/hakios-device.py sync
+
+      - name: Move uefi checkout to the u-boot branch
+        run: |
+          cd hakios
+          git -C uefi fetch origin u-boot
+          git -C uefi checkout FETCH_HEAD
+
+      - name: Apply the loader platform patch (instantnoodlep, fb 0x9C000000)
+        run: |
+          cd hakios
+          git apply --check ../ci/xnuloader-instantnoodlep.patch
+          git apply ../ci/xnuloader-instantnoodlep.patch
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang lld python3 git curl cpio xz-utils bc bison flex \
+            gcc-aarch64-linux-gnu qemu-system-arm unzip uuid-dev llvm lzfse 7zip
+          # lzfse decodes the device tree (mkidentity.sh); 7zip 26 reads the APFS images (unpack.sh)
+
+      - name: Free disk space (IPSW 6.2 GB + unpack ~8 GB + kernel + userland)
+        run: |
+          sudo apt-get clean
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
+          sudo docker image prune -af >/dev/null 2>&1 || true
+          df -h / /mnt
+
+      - name: Move the tree to the data disk (/mnt has ~65 GB; / is tight)
+        run: |
+          mkdir -p /mnt/hk
+          mv hakios /mnt/hk/hakios
+          ln -s /mnt/hk/hakios hakios
+          df -h / /mnt
+
+      - name: Cache theos
+        uses: actions/cache@v4
+        with:
+          path: ~/theos
+          key: theos-linux-ubuntu-v3
+
+      - name: Install theos (manual layout, cctools + iPhoneOS16.5.sdk)
+        run: |
+          set -e
+          THEOS_DIR="$HOME/theos"
+          if [ ! -f "$THEOS_DIR/Makefile" ]; then
+            rm -rf "$THEOS_DIR"
+            git clone --recursive --depth 1 https://github.com/theos/theos.git "$THEOS_DIR"
+          fi
+          if [ ! -x "$THEOS_DIR/toolchain/linux/iphone/bin/ld" ]; then
+            rm -rf /tmp/tc && mkdir -p /tmp/tc "$THEOS_DIR/toolchain/linux/iphone"
+            curl -fL -o /tmp/tc/tc.tar.xz "https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-$(uname -m).tar.xz"
+            tar -xJf /tmp/tc/tc.tar.xz -C /tmp/tc
+            tar_root=/tmp/tc
+            [ -d /tmp/tc/bin ] || tar_root=$(find /tmp/tc -maxdepth 4 -type d -name bin -printf '%h\n' | head -1)
+            cp -a "$tar_root"/. "$THEOS_DIR/toolchain/linux/iphone/"
+          fi
+          if [ ! -d "$THEOS_DIR/sdks/iPhoneOS16.5.sdk" ]; then
+            rm -rf /tmp/sdkrepo
+            git clone --depth 1 --filter=blob:none --sparse https://github.com/theos/sdks.git /tmp/sdkrepo
+            git -C /tmp/sdkrepo sparse-checkout set iPhoneOS16.5.sdk
+            mkdir -p "$THEOS_DIR/sdks"
+            mv /tmp/sdkrepo/iPhoneOS16.5.sdk "$THEOS_DIR/sdks/"
+          fi
+          test -x "$THEOS_DIR/toolchain/linux/iphone/bin/ld"
+          test -d "$THEOS_DIR/sdks/iPhoneOS16.5.sdk"
+          echo "THEOS=$THEOS_DIR" >> "$GITHUB_ENV"
+
+      - name: Download the Darwin 16.5 IPSW (6 165 698 198 bytes)
+        # URL measured HTTP 200 on 2026-11-07 in ilmilm/ipsw-reachability
+        # (run 42378332614 "ipsw-mtree", job log run-42378112391.log in that repository); reused, not guessed.
+        run: |
+          URL='https://updates.cdn-apple.com/2023SpringFCS/fullrestores/032-85130/6AB0D10A-8AF9-4F6C-8CF5-A1B315CABE88/iPhone10,3,iPhone10,6_16.5_20F66_Restore.ipsw'
+          curl -fL --retry 3 --retry-delay 5 --connect-timeout 30 -o /mnt/ipsw.ipsw "$URL"
+          ls -l /mnt/ipsw.ipsw
+          test "$(wc -c < /mnt/ipsw.ipsw)" = 6165698198 || { echo "::error::IPSW is not the expected 6165698198 bytes"; exit 1; }
+          df -h /mnt
+
+      - name: Unpack the IPSW into sysimage/ (make unpack)
+        run: |
+          cd hakios
+          make unpack IPSW=/mnt/ipsw.ipsw
+          ls -l sysimage/DeviceTree*.im4p
+
+      - name: Loader with the real identity (mkidentity.sh + make loader)
+        run: |
+          cd hakios
+          xnuloader/mkidentity.sh
+          echo "----- xnuloader/identity.h: readable strings -----"
+          python3 - <<'EOF'
+          import re
+          data = bytes(int(m.group(1), 16)
+                       for m in re.finditer(r'0x([0-9a-fA-F]{2}),', open('xnuloader/identity.h').read()))
+          seen = set()
+          for s in re.findall(rb'[ -~]{4,}', data):
+              s = s.decode()
+              if s not in seen:
+                  seen.add(s)
+                  print(s)
+                  if re.search(r'iPhone|D22|APL', s):
+                      print(f'::notice::identity carries Apple device data: {s}')
+          EOF
+          make loader
+
+      - name: Device defconfig (oneplus8pro)
+        run: |
+          cd hakios
+          make oneplus8pro_defconfig
+          make config
+
+      - name: Kernel (XNU with sm8250 device configuration)
+        run: |
+          cd hakios
+          make kernel JOBS=$(nproc)
+
+      - name: Dump kernel build diagnostics (on failure)
+        if: failure()
+        run: |
+          cd hakios
+          for f in xnu-deps/exporthdrs.log xnu-deps/*.log; do
+            [ -f "$f" ] && { echo "===== $f ====="; tail -60 "$f"; }
+          done
+          find xnu-src -name '*.log' 2>/dev/null | while read -r f; do
+            echo "===== $f ====="; tail -40 "$f"
+          done
+
+      - name: "Userland images (PREBUILT=1 REST=1): root.apfs + system.apfs"
+        run: |
+          cd hakios
+          PREBUILT=1 REST=1 userland/build.sh
+          ls -l userland/root.apfs userland/system.apfs
+
+      - name: Payload (kernel + root.apfs ramdisk, USB command mode)
+        # --usb: the loader stays resident in its USB command loop (usb_start, loader.c 4359), so
+        # `xl ramdisk userland/system.apfs` and `xl run` can drive the session from the host.
+        run: |
+          cd hakios
+          xnuloader/mkpayload.py -o payload-op8pro-darwin.bin kernel=hakios-kernel ramdisk=userland/root.apfs \
+            --cmdline "debug=0x8 rd=md0 hv_wdt_pet=1 bootcpu=7 cpus=8 ufs=2" --usb
+          sha256sum hakios-kernel userland/root.apfs payload-op8pro-darwin.bin
+          python3 - <<'EOF'
+          import struct
+          d = open('payload-op8pro-darwin.bin', 'rb').read()
+          magic, size = struct.unpack_from('<II', d, 0)
+          assert magic == 0x50554E58, 'not an XNUP payload'
+          off, names = 8, []
+          while off < 8 + size:
+              name, ln, _ = struct.unpack_from('<16sII', d, off)
+              off += 24
+              if not name.strip(b'\0'):
+                  break
+              names.append(name.strip(b'\0').decode())
+              off += (ln + 15) & ~15
+          print('payload entries:', names)
+          for want in ('kernel', 'ramdisk', 'cmdline', 'usb'):
+              assert want in names, f'{want} missing from the payload'
+          EOF
+
+      - name: U-Boot for oneplus8pro + the darwin boot image
+        run: |
+          cd hakios
+          uefi/u-boot/build.sh oneplus8pro
+          tools/mkubootimg.py -d oneplus8pro -p payload-op8pro-darwin.bin -o hakios-u-boot-darwin.img
+          sha256sum u-boot/build-oneplus8pro/u-boot.bin hakios-u-boot-darwin.img
+
+      - name: Disk report (peak)
+        if: always()
+        run: |
+          df -h / /mnt
+          du -sh /mnt/hk/hakios/sysimage /mnt/hk/hakios/userland /mnt/hk/hakios/xnu-build* 2>/dev/null || true
+
+      - name: "Upload darwin artifacts: no system.apfs (2.5 GB, goes to the phone with xl ramdisk)"
+        uses: actions/upload-artifact@v4
+        with:
+          name: hakios-op8pro-darwin
+          path: |
+            hakios/hakios-kernel
+            hakios/payload-op8pro-darwin.bin
+            hakios/hakios-u-boot-darwin.img
+            hakios/userland/root.apfs
+            hakios/xnuloader/identity.h
+          if-no-files-found: error
