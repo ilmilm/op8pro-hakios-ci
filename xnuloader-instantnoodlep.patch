@@ -66,7 +66,28 @@
  
  /* ------------------------------------------------------------------------ */
  
-@@ -2158,54 +2120,8 @@
+@@ -1731,6 +1693,20 @@
+ static int
+ hc_list_is_uefis(void)
+ {
++	/* While the kernel's own transfer list is in the controller, its registers must not be
++	 * read: the kernel's UFS driver runtime-suspends the controller when storage goes idle
++	 * (clock gated), and a register read then stalls this core for good -- the 2026-11-08
++	 * wedges (USB answering with the device enumerated, SpringBoard frozen). The kernel's
++	 * switched_in/switched_out counters in the shared block say whose list is in; the
++	 * registers are only read once the kernel says its list is out (it re-enables the
++	 * controller on its way out). */
++	if (hc_known && block_shared.kernel_native.switched_in != 0) {
++		flush_dcache((uint64_t)(uintptr_t)&block_shared.kernel_native,
++		    (uint64_t)(uintptr_t)&block_shared.kernel_native + sizeof(block_shared.kernel_native));
++		if (block_shared.kernel_native.switched_in != block_shared.kernel_native.switched_out) {
++			return 0;
++		}
++	}
+ 	return !hc_known || (hc_rd(HC_UTRLBA) == hc_uefi_lo && hc_rd(HC_UTRLBAU) == hc_uefi_hi &&
+ 	       (hc_rd(HC_UTRLRSR) & 1) != 0);
+ }
+@@ -2158,54 +2134,8 @@
  			s = 0x800000000000000FULL;      /* EFI_ACCESS_DENIED */
  			bytes = 0;
  		} else if (op == BLOCK_OP_WRITE || op == BLOCK_OP_WRITE_FAST || op == BLOCK_OP_FLUSH) {
@@ -123,7 +144,7 @@
  		} else if (op == BLOCK_OP_READ) {
  			s = bio->read_blocks(bio, bio->media->media_id, lba, bytes, block_buffer);
  			/* what the controller wrote is in memory; drop whatever this core held of the buffer */
-@@ -4345,10 +4261,31 @@
+@@ -4345,10 +4275,31 @@
  		SCREEN.stride = GOP->mode->info->pixels_per_scanline * 4;
  		if (SCREEN.base == 0xE1000000ULL) {
  			PLAT = &platform_redwood;
