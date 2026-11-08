@@ -87,7 +87,26 @@
  	return !hc_known || (hc_rd(HC_UTRLBA) == hc_uefi_lo && hc_rd(HC_UTRLBAU) == hc_uefi_hi &&
  	       (hc_rd(HC_UTRLRSR) & 1) != 0);
  }
-@@ -2158,54 +2134,8 @@
+@@ -1758,6 +1734,18 @@
+ 
+ 	if (!hc_known) {
+ 		return;
++	}
++	/* If the kernel left its own list in the controller, the controller may be in its runtime-
++	 * suspended (clock gated) state -- a register read would stall this core (the 2026-11-08
++	 * wedges). Storage is done for the session either way (RAM-only logs): leave the
++	 * controller alone and let the shared-memory checks in hc_list_is_uefis refuse the I/O. */
++	if (block_shared.kernel_native.switched_in != block_shared.kernel_native.switched_out) {
++		flush_dcache((uint64_t)(uintptr_t)&block_shared.kernel_native,
++		    (uint64_t)(uintptr_t)&block_shared.kernel_native + sizeof(block_shared.kernel_native));
++		if (block_shared.kernel_native.switched_in != block_shared.kernel_native.switched_out) {
++			print("ufs: %s: the kernel's list is still in and the controller may be suspended: not touching it\n", when);
++			return;
++		}
+ 	}
+ 	lo = hc_rd(HC_UTRLBA);
+ 	hi = hc_rd(HC_UTRLBAU);
+@@ -2158,54 +2146,8 @@
  			s = 0x800000000000000FULL;      /* EFI_ACCESS_DENIED */
  			bytes = 0;
  		} else if (op == BLOCK_OP_WRITE || op == BLOCK_OP_WRITE_FAST || op == BLOCK_OP_FLUSH) {
@@ -144,7 +163,16 @@
  		} else if (op == BLOCK_OP_READ) {
  			s = bio->read_blocks(bio, bio->media->media_id, lba, bytes, block_buffer);
  			/* what the controller wrote is in memory; drop whatever this core held of the buffer */
-@@ -4345,10 +4275,31 @@
+@@ -3817,6 +3759,8 @@
+ 			/* the kernel looks at this once a second and comes back as it does when its time is up */
+ 			if (busy && running_live != NULL) {
+ 				((struct kernel_live *)(uintptr_t)running_live)->stop = 1;
++				flush_dcache((uint64_t)(uintptr_t)running_live,
++				    (uint64_t)(uintptr_t)running_live + 0x1000);
+ 			}
+ 			fb_reply("OKAY", "");
+ 		} else if (starts_with(cmd, "getvar:")) {
+@@ -4345,10 +4289,31 @@
  		SCREEN.stride = GOP->mode->info->pixels_per_scanline * 4;
  		if (SCREEN.base == 0xE1000000ULL) {
  			PLAT = &platform_redwood;
