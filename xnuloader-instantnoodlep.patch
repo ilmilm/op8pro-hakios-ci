@@ -1,36 +1,264 @@
-diff --git a/xnuloader/loader.c b/xnuloader/loader.c
-index 422f9d3..4fc3946 100644
 --- a/xnuloader/loader.c
 +++ b/xnuloader/loader.c
-@@ -588,6 +588,21 @@ static const struct platform platform_redwood = {
- 	.small_cores = 0x0f,
- };
+@@ -347,6 +347,9 @@
+ static void
+ write_logs(const char *klog, uint64_t klog_len)
+ {
++#ifdef HAKIOS_RAM_ONLY
++	compose_logs(klog, klog_len);
++#else
+ 	efi_block_io *bio = find_log_partition();
  
-+static const struct platform platform_instantnoodlep = {
-+	/* OnePlus 8 Pro (IN2020, SM8250 "kona"): the same shape redwood's entry has.
-+	   The io window runs from the SoC's first peripheral (GCC at 0x00100000) through
-+	   the peripherals' end; GIC-500 at the addresses the phone's device tree gives.
-+	   io_base must be non-zero: XNU treats a zero SoC base as "no SoC". */
-+	.name = "instantnoodlep", .io_base = 0x00100000, .io_size = 0x3FF00000,
-+	.gic_dist = 0x17A00000, .gic_redist = 0x17A60000, .uart = 0, .log_other_cpu = 1,
-+	.cores = 8, .core_shift = 8,
-+	/*
-+	 * Cores 0-3 are Cortex-A55s (1.8 GHz at most), 4-7 Cortex-A77s (2.4/2.84 GHz):
-+	 * the same split redwood has (the phone's own device tree, capacity 1024 vs 1894).
-+	 */
-+	.small_cores = 0x0f,
-+};
-+
- /* ------------------------------------------------------------------------ */
+ 	compose_logs(klog, klog_len);
+@@ -393,6 +396,7 @@
+ 	print("log: %d bytes written to logdump (%x), read back %s (%x)\n", len, ws,
+ 	    EFI_ERROR(ws) ? "not tried" : same ? "the same" : "DIFFERENT", rs);
+ 	compose_logs(klog, klog_len);
++#endif
+ }
  
  static void
-@@ -4345,6 +4360,9 @@ efi_main(efi_handle image, efi_system_table *st)
+@@ -587,6 +591,13 @@
+ 	 */
+ 	.small_cores = 0x0f,
+ };
++
++static const struct platform platform_instantnoodlep = {
++	.name = "instantnoodlep", .io_base = 0x00100000, .io_size = 0x3FF00000,
++	.gic_dist = 0x17A00000, .gic_redist = 0x17A60000, .uart = 0, .log_other_cpu = 1,
++	.cores = 8, .core_shift = 8, .small_cores = 0x0f,
++};
++
+ 
+ /* ------------------------------------------------------------------------ */
+ 
+@@ -1980,7 +1991,7 @@
+ 				}
+ 			}
+ 		}
+-		if (block_write_requested && block_is_darwin(info, bio, bp)) {
++		if (0 && block_write_requested && block_is_darwin(info, bio, bp)) {
+ 			block_write_part = (int)block_shared.parts;
+ 		}
+ 		block_bios[block_shared.parts++] = bio;
+@@ -2007,7 +2018,7 @@
+ 		block_bios[block_shared.parts++] = units[u].bio;
+ 	}
+ 	/* the kernel's own transfer list: this loader's area, if the controller is as UEFI keeps it */
+-	if (hc_known && hc_list_is_uefis() && hc_rd(HC_UTRLDBR) == 0 && (hc_rd(HC_HCE) & 1)) {
++	if (0 && hc_known && hc_list_is_uefis() && hc_rd(HC_UTRLDBR) == 0 && (hc_rd(HC_HCE) & 1)) {
+ 		memset(hc_area, 0, sizeof(hc_area));
+ 		flush_dcache((uint64_t)(uintptr_t)hc_area, (uint64_t)(uintptr_t)hc_area + sizeof(hc_area));
+ 		block_shared.native.hc_pa = HC_PA;
+@@ -2158,54 +2169,8 @@
+ 			s = 0x800000000000000FULL;      /* EFI_ACCESS_DENIED */
+ 			bytes = 0;
+ 		} else if (op == BLOCK_OP_WRITE || op == BLOCK_OP_WRITE_FAST || op == BLOCK_OP_FLUSH) {
+-			if (block_write_part < 0 || part != (uint32_t)block_write_part || lba < BLOCK_WRITE_FIRST) {
+-				/* not darwin, or not past what the build writes from the computer: never */
+-				if (block_writes_refused++ < 8) {
+-					print("ufs: a write of %d blocks from %d of %s: REFUSED\n", count, lba,
+-					    block_shared.part[part].name);
+-				}
+-				s = 0x800000000000000FULL;      /* EFI_ACCESS_DENIED */
+-				bytes = 0;
+-			} else if (op == BLOCK_OP_FLUSH) {
+-				s = bio->flush_blocks(bio);
+-				bytes = 0;
+-			} else if (op == BLOCK_OP_WRITE_FAST) {
+-				flush_dcache((uint64_t)(uintptr_t)block_buffer,
+-				    (uint64_t)(uintptr_t)block_buffer + bytes);
+-				s = bio->write_blocks(bio, bio->media->media_id, lba, bytes, block_buffer);
+-				if (!EFI_ERROR(s)) {
+-					block_writes++;
+-					block_write_bytes += bytes;
+-				}
+-			} else {
+-				/*
+-				 * The kernel filled the buffer and cleaned its lines of it; drop whatever this
+-				 * core holds, write, and read back -- the answer says the blocks hold what the
+-				 * kernel gave, or the write is no good. The read back overwrites the buffer,
+-				 * which the kernel does not need: it has the data.
+-				 */
+-				uint32_t want;
+-
+-				flush_dcache((uint64_t)(uintptr_t)block_buffer,
+-				    (uint64_t)(uintptr_t)block_buffer + bytes);
+-				want = ufs_crc32(block_buffer, bytes);
+-				s = bio->write_blocks(bio, bio->media->media_id, lba, bytes, block_buffer);
+-				if (!EFI_ERROR(s)) {
+-					bio->flush_blocks(bio);
+-					s = bio->read_blocks(bio, bio->media->media_id, lba, bytes, block_buffer);
+-					flush_dcache((uint64_t)(uintptr_t)block_buffer,
+-					    (uint64_t)(uintptr_t)block_buffer + bytes);
+-					if (!EFI_ERROR(s) && ufs_crc32(block_buffer, bytes) != want) {
+-						print("ufs: %d blocks from %d of darwin read back DIFFERENT\n",
+-						    count, lba);
+-						s = 0x800000000000000AULL;      /* EFI_VOLUME_CORRUPTED */
+-					}
+-				}
+-				if (!EFI_ERROR(s)) {
+-					block_writes++;
+-					block_write_bytes += bytes;
+-				}
+-			}
++			s = 0x800000000000000FULL;      /* EFI_ACCESS_DENIED */
++			bytes = 0;
+ 		} else if (op == BLOCK_OP_READ) {
+ 			s = bio->read_blocks(bio, bio->media->media_id, lba, bytes, block_buffer);
+ 			/* what the controller wrote is in memory; drop whatever this core held of the buffer */
+@@ -2527,9 +2492,11 @@
+ 	    ctx[EXC_CTX_ESR], ctx[EXC_CTX_FAR], ctx[EXC_CTX_LR], ctx[EXC_CTX_SP], ctx[EXC_CTX_SPSR]);
+ 	print("loader image base %x (elr offset %x)\n", (uint64_t)(uintptr_t)&__ImageBase,
+ 	    ctx[EXC_CTX_ELR] - (uint64_t)(uintptr_t)&__ImageBase);
+-	flush_log();
+-	ST->rt->reset_system(0 /* EfiResetCold */, 0, 0, NULL);
++	screen_quiet = 0;
++	print("diag: halted after exception (no reset)\n");
++	compose_logs(NULL, 0);
+ 	for (;;) {
++		wdt_pet();
+ 	}
+ }
+ 
+@@ -2707,6 +2674,49 @@
+ 	uint64_t base;
+ 	uint32_t width, height, stride;
+ } SCREEN;
++
++static void
++display_dump_block(const char *name, uint64_t base, const uint16_t *offsets, uint64_t count)
++{
++	print("DPU %s base=%x\n", name, base);
++	for (uint64_t i = 0; i < count; i++) {
++		uint64_t address = base + offsets[i];
++		uint32_t value = *(volatile uint32_t *)(uintptr_t)address;
++		print("DPU reg %x = %x\n", address, (uint64_t)value);
++	}
++}
++
++static void
++display_dump_registers(void)
++{
++	static const uint32_t sspp[] = { 0x5000, 0x7000, 0x9000, 0xb000, 0x25000, 0x27000, 0x29000, 0x2b000 };
++	static const uint16_t src[] = { 0x00, 0x08, 0x0c, 0x10, 0x14, 0x18, 0x1c, 0x20, 0x24, 0x28, 0x30, 0x34, 0x38, 0x44, 0x48, 0x160, 0x168, 0x16c, 0x170, 0x174 };
++	static const uint16_t ctl[] = { 0x00, 0x04, 0x08, 0x0c, 0x10, 0x14, 0x24, 0x40, 0x44, 0x48, 0x4c, 0x50, 0x70, 0x74, 0x78, 0x7c, 0x80, 0xa0, 0xa4, 0xa8, 0xac, 0xb0, 0xe8, 0xf4, 0x134 };
++	static const uint16_t lm[] = { 0x00, 0x04 };
++	static const uint16_t pp[] = { 0xa0, 0xac, 0xc8 };
++	static const uint16_t dsc[] = { 0x00, 0x04, 0x08, 0x0c, 0x10, 0x14, 0x18, 0x1c, 0x20, 0x24, 0x28, 0x2c, 0x30, 0x34, 0x38 };
++	static const uint32_t dscctl[] = { 0x82800, 0x82804, 0x82808, 0x8280c, 0x82404, 0x82008, 0x81c0c };
++	uint64_t base = 0x0ae00000;
++	int quiet = screen_quiet;
++	screen_quiet = 1;
++	print("== DPU READ-ONLY SNAPSHOT v1 ==\n");
++	print("GOP base=%x width=%d height=%d stride=%d\n", SCREEN.base, (uint64_t)SCREEN.width, (uint64_t)SCREEN.height, (uint64_t)SCREEN.stride);
++	for (uint64_t i = 0; i < sizeof(sspp) / sizeof(sspp[0]); i++) {
++		display_dump_block("SSPP", base + sspp[i], src, sizeof(src) / sizeof(src[0]));
++	}
++	for (uint64_t i = 0; i < 6; i++) {
++		display_dump_block("CTL", base + 0x2000 + i * 0x200, ctl, sizeof(ctl) / sizeof(ctl[0]));
++		display_dump_block("LM", base + 0x45000 + i * 0x1000, lm, sizeof(lm) / sizeof(lm[0]));
++		display_dump_block("PP", base + 0x71000 + i * 0x800, pp, sizeof(pp) / sizeof(pp[0]));
++	}
++	for (uint64_t i = 0; i < 4; i++) {
++		display_dump_block("DSC", base + 0x81000 + i * 0x400, dsc, sizeof(dsc) / sizeof(dsc[0]));
++	}
++	display_dump_block("DSCCTL", base, dscctl, sizeof(dscctl) / sizeof(dscctl[0]));
++	print("== END DPU SNAPSHOT ==\n");
++	screen_quiet = quiet;
++}
++
+ static uint64_t win_base, win_size; /* XNU's physical memory window, claimed once */
+ static uint64_t resident_rd_size;   /* root image kept at win_base + RESIDENT_RD_OFFSET, 0 if none */
+ static char last_result[64] = "idle";
+@@ -3707,6 +3717,7 @@
+ static int64_t
+ usb_wait(uint8_t endpoint)
+ {
++	static int pump_diag_done;
+ 	/* static: a long transfer is many short waits, and the watchdog must be fed across them */
+ 	static uint64_t last_pet;
+ 	uint64_t freq = READ_SYSREG(CNTFRQ_EL0), began = READ_SYSREG(CNTVCT_EL0);
+@@ -3717,6 +3728,12 @@
+ 		usb_device_event_data data;
+ 
+ 		USB->handle_event(&msg, &size, &data);
++		if (!pump_diag_done && READ_SYSREG(CNTVCT_EL0) - began > 3 * freq) {
++			pump_diag_done = 1;
++			int q = screen_quiet; screen_quiet = 0;
++			print("DIAG: pump msg=%x state=%x\n", (uint64_t)msg, (uint64_t)data.device_state);
++			screen_quiet = q;
++		}
+ 		if (msg == UsbDeviceEventDeviceStateChange) {
+ 			usb_connected = (data.device_state == UsbDeviceStateConnected);
+ 			return -1;
+@@ -3809,7 +3826,9 @@
+ 	int busy = run_active;
+ 
+ 	{
+-		if (busy && (starts_with(cmd, "oem ramdisk") || starts_with(cmd, "download:") || starts_with(cmd, "oem run") ||
++		if (starts_with(cmd, "oem run") || starts_with(cmd, "oem selftest") || starts_with(cmd, "oem hang")) {
++			fb_reply("FAIL", "display diagnostic: kernel execution disabled");
++		} else if (busy && (starts_with(cmd, "oem ramdisk") || starts_with(cmd, "download:") || starts_with(cmd, "oem run") ||
+ 		    starts_with(cmd, "oem selftest") || starts_with(cmd, "oem hang") || starts_with(cmd, "oem recording") ||
+ 		    starts_with(cmd, "oem sound") || starts_with(cmd, "oem clearscreen") || starts_with(cmd, "oem memmap"))) {
+ 			fb_reply("FAIL", "a kernel is running (oem stop ends it)");
+@@ -3984,6 +4003,14 @@
+ 			fb_reply("OKAY", "watchdog test: not petting any more");
+ 			for (;;) {
+ 			}
++		} else if (str_eq(cmd, "oem dpu")) {
++			if (busy || PLAT != &platform_instantnoodlep) {
++				fb_reply("FAIL", "display diagnostic requires an idle instantnoodlep");
++				return;
++			}
++			display_dump_registers();
++			compose_logs(NULL, 0);
++			fb_reply("OKAY", "read-only display snapshot staged");
+ 		} else if (starts_with(cmd, "oem memmap")) {
+ 			/* the firmware's memory map into the log (then "oem log" and fetch it) */
+ 			print_memory_map();
+@@ -4046,6 +4073,7 @@
+ static void
+ usb_command_loop(void)
+ {
++	print("DIAG: LOOP connected=%d\n", (uint64_t)usb_connected);
+ 	screen_quiet = 1;
+ 	for (;;) {
+ 		char cmd[128];
+@@ -4323,7 +4351,7 @@
+ 	if (((const struct payload_header *)PAYLOAD_BASE)->magic != PAYLOAD_MAGIC) {
+ 		load_payload_from_volume();
+ 	}
+-	print("== XNULOADER v3 ==\n");
++	print("== XNULOADER v3 DISPLAY-DIAG RAM-ONLY ==\n");
+ 	print_banner();
+ 	if (volume_payload_bytes != 0) {
+ 		print("payload: %d bytes from \\EFI\\hakios\\payload.bin on the volume this loader was started from\n",
+@@ -4345,6 +4373,8 @@
  		SCREEN.stride = GOP->mode->info->pixels_per_scanline * 4;
  		if (SCREEN.base == 0xE1000000ULL) {
  			PLAT = &platform_redwood;
 +		} else if (SCREEN.base == 0x9C000000ULL) {
-+			/* OnePlus 8 Pro: ABL's continuing splash (cont_splash 0x9c000000). */
 +			PLAT = &platform_instantnoodlep;
  		} else {
  			ramfb_phone_screen();
  		}
+@@ -4361,10 +4391,14 @@
+ 		usb_command_loop();
+ 	}
+ 
+-	/* One-shot mode: run the kernel that came with the image, then reset. */
+-	if (have_payload) {
++	if (have_payload && pi.kernel != NULL) {
+ 		run_kernel(0, 0);
+ 	}
+-	reboot();
++	print("diag: usb=%d kernel=%x — staying alive, no reboot\n", (uint64_t)pi.usb_mode,
++	    (uint64_t)(uintptr_t)pi.kernel);
++	compose_logs(NULL, 0);
++	for (;;) {
++		wdt_pet();
++	}
+ 	return 0;
+ }
