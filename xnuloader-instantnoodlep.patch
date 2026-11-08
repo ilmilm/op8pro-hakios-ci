@@ -235,7 +235,7 @@
  	print_banner();
  	if (volume_payload_bytes != 0) {
  		print("payload: %d bytes from \\EFI\\hakios\\payload.bin on the volume this loader was started from\n",
-@@ -4345,6 +4373,8 @@
+@@ -4345,10 +4373,31 @@
  		SCREEN.stride = GOP->mode->info->pixels_per_scanline * 4;
  		if (SCREEN.base == 0xE1000000ULL) {
  			PLAT = &platform_redwood;
@@ -244,7 +244,30 @@
  		} else {
  			ramfb_phone_screen();
  		}
-@@ -4361,10 +4391,14 @@
+ 		print("display %d x %d at %x\n", (uint64_t)SCREEN.width, (uint64_t)SCREEN.height, SCREEN.base);
++	}
++	if (PLAT == &platform_instantnoodlep) {
++		/* The dts lies about the panel geometry: ABL left the DPU scanning whatever mode Android
++		 * used last (measured: 1080x2376, stride 4320, VIG0+VIG1 bonded at source-x 0/540, DSC
++		 * bonded picture 1080x2376 slice 540x72). Drawing 1440x3168@5760 into that produces the
++		 * tiled-ghost screen. Read the live pipeline instead: the two VIG pipes' SRC_SIZE widths
++		 * add up to the picture width, SRC_YSTRIDE0 is the real byte stride. */
++		uint32_t sz0 = *(volatile uint32_t *)(uintptr_t)0x0AE05000;      /* VIG0 SRC_SIZE */
++		uint32_t sz1 = *(volatile uint32_t *)(uintptr_t)0x0AE07000;      /* VIG1 SRC_SIZE */
++		uint32_t st0 = *(volatile uint32_t *)(uintptr_t)0x0AE05024;      /* VIG0 SRC_YSTRIDE0 */
++		uint32_t w = (sz0 & 0xffff) + (sz1 & 0xffff), h = sz0 >> 16, stride = st0 & 0xffff;
++		if (sz0 == sz1 && w >= 720 && w <= 1600 && h >= 1000 && h <= 3400 && stride >= w * 3
++		    && stride % 4 == 0 && (SCREEN.width != w || SCREEN.height != h || SCREEN.stride != stride)) {
++			print("display: the dts said %d x %d stride %d; the live DPU scanout is %d x %d stride %d -- using the latter\n",
++			    (uint64_t)SCREEN.width, (uint64_t)SCREEN.height, (uint64_t)SCREEN.stride, (uint64_t)w, (uint64_t)h, (uint64_t)stride);
++			SCREEN.width = w;
++			SCREEN.height = h;
++			SCREEN.stride = stride;
++		}
+ 	}
+ 	print("platform %s\n", PLAT->name);
+ 
+@@ -4361,10 +4410,14 @@
  		usb_command_loop();
  	}
  
